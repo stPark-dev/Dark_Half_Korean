@@ -29,6 +29,11 @@ def load_tbl(path):
 
 BANK_CH = {0xF5: 'A', 0xF6: 'B', 0xF7: 'C'}
 
+# 제어 코드 범위에 있는데 실제로는 한자 글리프인 코드. 단어 안에 쓰이므로
+# 판독 시 글자를 보여줘야 읽히고, 번역에서는 버려도 된다(제어 기능이 없다).
+# 나머지 0x06~0x1E 는 탁음 가타카나, 0xE6~ 는 탁음 히라가나로 제어에만 쓰인다.
+CTRL_KANJI = {0x00: '魔', 0x01: '士', 0x02: '見', 0x1F: '入'}
+
 def ambiguous(t):
     """여러 코드가 공유하는 글리프의 코드 집합.
 
@@ -53,10 +58,16 @@ def decode(b, t, kanji=None, amb=None):
     out = []; i = 0
     while i < len(b):
         x = b[i]
-        if kanji is not None and x in amb and x not in CTRL:
+        if x == 0xE3:
+            # 개행. ★ 과 글리프를 공유하지만 인코딩이 되돌아가므로 \n 으로 보여준다.
+            # 줄바꿈 위치는 번역문 길이 판단에 필요하다.
+            out.append('\\n'); i += 1
+        elif kanji is not None and x in amb and x not in CTRL:
             out.append(f"<{x:02X}>"); i += 1
         elif x == 0x01:
+            # 앞 글자가 탁음 가능한 가나면 탁점으로 결합, 아니면 글리프 士
             if out and out[-1] in DAKU: out[-1] = DAKU[out[-1]]
+            elif kanji is not None: out.append('<士>')
             else: out.append('<01>')
             i += 1
         elif x in BANK_CH and i+1 < len(b):
@@ -65,13 +76,14 @@ def decode(b, t, kanji=None, amb=None):
             else:
                 out.append(f"<{BANK_CH[x]}{b[i+1]:02X}>")
             i += 2
-        elif x == 0xE3:
-            out.append('\\n'); i += 1
         elif x in CTRL:
-            # 0x00-0x05 는 글리프(00=魔 01=士 02=見)이기도 하지만, 같은 코드가
-            # 메뉴/창 제어에도 쓰인다. 위치만으로 구분할 수 없으므로 판독 모드에서도
-            # 태그로 남긴다 — 번역 시 '보존해야 할 바이트'로 취급하는 편이 안전하다.
-            out.append(f"<{x:02X}>"); i += 1
+            # 태그로 남기되, 한자 글리프인 4개는 글자를 보여준다 (<魔> 형태).
+            # 제어 코드와 한눈에 구분되고, krcodec 이 같은 표기를 되받는다.
+            if kanji is not None and x in CTRL_KANJI:
+                out.append(f"<{CTRL_KANJI[x]}>")
+            else:
+                out.append(f"<{x:02X}>")
+            i += 1
         else:
             out.append(t.get(x, f"[{x:02X}]")); i += 1
     return ''.join(out)

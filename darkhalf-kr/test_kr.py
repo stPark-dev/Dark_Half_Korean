@@ -105,6 +105,11 @@ def test_readable_safe(rom_path):
         except KeyError:
             rt += 1
     check("단일바이트 판독->인코딩 왕복", rt == 0, f"불일치 {rt}개")
+    from dump import CTRL_KANJI
+    bad2 = [c for c, g in CTRL_KANJI.items()
+            if decode(bytes([c]), tbl, {}) != f"<{g}>"
+            or krcodec.encode(f"<{g}>", {}, tbl) != bytes([c])]
+    check("제어범위 한자 <魔><士><見><入> 왕복", not bad2, f"{[hex(c) for c in bad2]}")
 
 if __name__ == "__main__":
     main(sys.argv[1])

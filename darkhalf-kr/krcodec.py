@@ -35,7 +35,10 @@ BANK_TAG = {'A': 0xF5, 'B': 0xF6, 'C': 0xF7}
 def capacity():
     return len(reclaimable()) + sum(n for _, n in BANKS)
 
-_TAG = re.compile(r"<([0-9A-Fa-f]{2})>|<([ABCabc])([0-9A-Fa-f]{2})>|\\n")
+# 제어 코드 범위의 한자 글리프. 판독문이 <魔> 형태로 내보내므로 되받는다.
+CTRL_KANJI_REV = {'魔': 0x00, '士': 0x01, '見': 0x02, '入': 0x1F}
+
+_TAG = re.compile(r"<([0-9A-Fa-f]{2})>|<([ABCabc])([0-9A-Fa-f]{2})>|<([魔士見入])>|\\n")
 
 def parse(text):
     """번역문 -> 토큰열. ('ch', 문자) 또는 ('raw', bytes)"""
@@ -45,6 +48,7 @@ def parse(text):
         if m:
             if m.group(0) == "\\n": out.append(("raw", bytes([0xE3])))
             elif m.group(1): out.append(("raw", bytes([int(m.group(1), 16)])))
+            elif m.group(4): out.append(("raw", bytes([CTRL_KANJI_REV[m.group(4)]])))
             else:
                 bank = BANK_TAG[m.group(2).upper()]
                 out.append(("raw", bytes([bank, int(m.group(3), 16)])))
