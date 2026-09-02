@@ -1,0 +1,22 @@
+# 롬 이미지 / 패치 결과물 (배포 대상 아님)
+*.sfc
+*.smc
+*.zip
+
+# 에뮬레이터
+Mesen_2.1.1_Linux_x64/
+*.sav
+*.srm
+*.mss
+
+# 파이썬
+__pycache__/
+*.pyc
+
+# 에뮬레이터 트레이스 로그 (재생성 가능)
+darkhalf-kr/dma_log*.txt
+darkhalf-kr/vram_write*.txt
+darkhalf-kr/wram_write*.txt
+
+# vram.bin / cgram.bin 은 의도적으로 추적합니다.
+# 미해결 문제 4.1(메뉴 폰트)의 유일한 실증 자료이며 수동 덤프라 재생성이 어렵습니다.

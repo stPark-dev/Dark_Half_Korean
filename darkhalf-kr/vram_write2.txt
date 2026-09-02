@@ -1,2 +1,0 @@
-CPU  VRAMbyte=$4F30  PC=$00:0000  
-DMA* VRAMbyte=$5C00  PC=$00:0000  src=$7E:273B size=1024
