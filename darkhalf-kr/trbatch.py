@@ -7,8 +7,34 @@ usage:
   trbatch.py stat <tsv>                     진행 통계
 """
 import sys, os, json, re
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 KANA = re.compile(r'[ぁ-んァ-ヶ]')
+JP = re.compile(r'[ぁ-んァ-ヶ一-鿿]')
+
+# 최종 배정에서 상위 145자만 단일바이트를 받으므로 평균이 1.0 을 넘는다.
+# 코퍼스가 커지면 1.3~1.4 로 수렴하니 보수적으로 잡아 재작업을 줄인다.
+BYTES_PER_SYL = 1.4
+
+def budget(readable, cap):
+    """이 세그먼트에서 한글 텍스트가 쓸 수 있는 바이트와 대략 자수.
+
+    제어 태그와 보존 문자(문장부호/숫자/영문)가 먹는 바이트를 빼고 남는 만큼이
+    한글 몫이다. 일본어 구간이 먹던 바이트가 그대로 예산이 된다.
+    """
+    import krcodec
+    from dump import load_tbl
+    tbl = load_tbl(os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl"))
+    keep = "".join(ch for kind, ch in
+                   ((k, v if k == "ch" else None) for k, v in krcodec.parse(readable))
+                   if kind == "ch" and ch and not JP.match(ch))
+    raw_tags = sum(len(v) for k, v in krcodec.parse(readable) if k == "raw")
+    try:
+        keep_b = len(krcodec.encode(keep, {}, tbl))
+    except KeyError:
+        keep_b = len(keep)
+    free = cap - raw_tags - keep_b
+    return free, int(free / BYTES_PER_SYL)
 HDR = "#id\trun\taddr\tlen\tptrs\torig_hex\torig_text\treadable\ttranslation\n"
 
 def load(tsv):
@@ -35,7 +61,8 @@ def cmd_show(tsv, start, count):
     rows = load(tsv); t = todo(rows)
     print(f"미번역 일본어 세그먼트 {len(t)}개 중 {start}~{start+count-1}\n")
     for c in t[start:start+count]:
-        print(f"#{c[0]}  {c[3]}바이트")
+        free, syl = budget(c[7], int(c[3]))
+        print(f"#{c[0]}  {c[3]}바이트  (한글 {free}바이트 ≈ {syl}자)")
         print(f"  {c[7]}")
     print(f"\n(다음 시작 인덱스: {start+count})")
 

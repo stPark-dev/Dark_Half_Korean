@@ -75,11 +75,11 @@ def cmd_insert(rom_path, tsv, out):
         c = line.rstrip('\n').split('\t')
         rows.append(c)
     assert len(rows) == len(segs), f"행 수 불일치 {len(rows)} != {len(segs)}"
-    import krcodec, json
+    import krcodec, tralloc, json
     t = load_tbl(TBL)
     trs = [c[8] if len(c) > 8 else "" for c in rows]
-    todo = [x for x in trs if x.strip()]
-    codes, freq, st = krcodec.allocate(todo, t) if todo else ({}, {}, None)
+    pairs = [(int(c[3]), x) for c, x in zip(rows, trs) if x.strip()]
+    codes, freq, st = tralloc.allocate(pairs, t) if pairs else ({}, {}, None)
     if st:
         print(f"번역 세그먼트 {len(todo)}개 | 고유 음절 {st['unique']}/{st['capacity']}자")
         print(f"  단일바이트 배정 {st['single_slots']}자가 출현의 "

@@ -31,9 +31,10 @@ def report(tsv, worst=12):
     if not done:
         print("번역된 세그먼트가 없습니다."); return 0
 
+    import tralloc
     texts = [t for _, _, t in done]
     try:
-        codes, freq, st = krcodec.allocate(texts, tbl)
+        codes, freq, st = tralloc.allocate([(cap, t) for _, cap, t in done], tbl)
     except SystemExit as e:
         print(f"\n!! 배정 불가: {e}")
         uniq = {v for t in texts for k, v in krcodec.parse(t)
