@@ -21,12 +21,12 @@ def main(rom_path):
     banks = dict(krcodec.BANKS)
     check("F5 뱅크 256슬롯", banks.get(0xF5) == 256, f"{banks.get(0xF5)}")
     check("F6 뱅크 256슬롯", banks.get(0xF6) == 256, f"{banks.get(0xF6)}")
-    check("F7 뱅크 62슬롯 (0x00-0x3D 만)", banks.get(0xF7) == 62, f"{banks.get(0xF7)}")
+    check("F7 뱅크 96슬롯 (0x00-0x3D + 0xDE-0xFF)", banks.get(0xF7) == 96, f"{banks.get(0xF7)}")
 
     print("[2] 수용량")
     os.environ.pop("DH_KEEP_KANA", None)
     check("단일바이트 회수 145개", len(krcodec.reclaimable()) == 145, f"{len(krcodec.reclaimable())}")
-    check("전면 번역 수용량 719자", krcodec.capacity() == 719, f"{krcodec.capacity()}")
+    check("전면 번역 수용량 753자", krcodec.capacity() == 753, f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"
     check("가나 보존 시 단일바이트 34개", len(krcodec.reclaimable()) == 34, f"{len(krcodec.reclaimable())}")
     os.environ.pop("DH_KEEP_KANA", None)
@@ -44,9 +44,10 @@ def main(rom_path):
         check(f"{tag} -> {want:#08x}", got == [want], f"실제 {[hex(x) for x in got]}")
 
     print("[4] F7 상위 슬롯은 절대 배정되지 않아야 한다 (폰트 아닌 데이터 영역)")
-    codes, _, _ = krcodec.allocate(["".join(chr(0xAC00+i) for i in range(719))], tbl)
-    bad = [ch for ch, s in codes.items() if len(s) == 2 and s[0] == 0xF7 and s[1] >= 0x3E]
-    check("F7 0x3E 이상 미배정", not bad, f"{len(bad)}개 배정됨")
+    codes, _, _ = krcodec.allocate(["".join(chr(0xAC00+i) for i in range(753))], tbl)
+    bad = [ch for ch, s in codes.items()
+           if len(s) == 2 and s[0] == 0xF7 and 0x3E <= s[1] < 0xDE]
+    check("F7 0x3E-0xDD (정체불명 구간) 미배정", not bad, f"{len(bad)}개 배정됨")
 
     print("[5] 인코딩 왕복 — 배정한 코드로 인코딩하면 길이가 예측과 맞는다")
     codes, freq, st = krcodec.allocate(["가나다"], tbl)

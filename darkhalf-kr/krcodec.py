@@ -26,10 +26,18 @@ def reclaimable():
     skip = KEEP | CTRL | (KANA if os.environ.get("DH_KEEP_KANA") == "1" else set())
     return sorted(c for c in range(0x20, 0xE0) if c not in skip)
 
-# 2바이트 이스케이프 뱅크. F7 은 0x00~0x3D 까지만 폰트 데이터이고
-# 0x3E 이후에는 폰트가 아닌 다른 데이터가 있다 (글리프 렌더로 확인).
-# 그 위를 덮으면 롬이 깨지므로 62슬롯으로 제한한다.
-BANKS = [(0xF5, 256), (0xF6, 256), (0xF7, 62)]
+# 2바이트 이스케이프 뱅크.
+# F5/F6 은 전 구간이 실제 글리프다. F7 은 구간별로 성질이 다르다.
+#   0x00-0x3D  실제 글리프 62개        -> 전면 번역 시 회수 가능
+#   0x3E-0xDD  정체 불명 데이터 160개  -> 덮으면 무엇이 깨지는지 미확인. 쓰지 않는다
+#   0xDE-0xFF  0xFF 채움 34개          -> 미사용이므로 안전
+# 자세한 근거는 PROGRESS.md 1.2.1 / 2.4.
+BANK_SLOTS = {
+    0xF5: list(range(0, 256)),
+    0xF6: list(range(0, 256)),
+    0xF7: list(range(0x00, 0x3E)) + list(range(0xDE, 0x100)),
+}
+BANKS = [(b, len(v)) for b, v in BANK_SLOTS.items()]
 BANK_TAG = {'A': 0xF5, 'B': 0xF6, 'C': 0xF7}
 
 def capacity():
@@ -81,8 +89,8 @@ def allocate(texts, base_table, priority=()):
                          f"(뱅크는 F5/F6/F7 이 전부이고 F7 은 62슬롯이 상한).")
     codes = {}; slots = []
     for c in single: slots.append(bytes([c]))
-    for bank, n in BANKS:
-        for i in range(n): slots.append(bytes([bank, i]))
+    for bank, idxs in BANK_SLOTS.items():
+        for i in idxs: slots.append(bytes([bank, i]))
     for ch, slot in zip(ordered, slots): codes[ch] = slot
     n1 = sum(freq[c] for c, s in codes.items() if len(s) == 1)
     n2 = sum(freq[c] for c, s in codes.items() if len(s) == 2)
