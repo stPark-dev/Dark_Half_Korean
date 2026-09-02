@@ -95,9 +95,52 @@ def allocate(texts, base_table, priority=()):
 ALIAS = {'!': '！', '?': '？', '(': '（', ')': '）', '.': '。', ',': '、',
          '"': '「', "'": '「', '…': '‥', '·': '・'}
 
+def _kanji_rev():
+    """한자 -> 뱅크 이스케이프. 판독문이 뱅크 한자를 글자로 보여주므로
+    그 글자를 그대로 옮겨 적어도 원래 바이트로 되돌아가야 한다.
+    같은 한자가 두 코드에 있으면 낮은 코드를 쓴다(글리프가 같아 표시는 동일)."""
+    try:
+        from kanji import KANJI
+    except Exception:
+        return {}
+    rev = {}
+    for (b, i), ch in sorted(KANJI.items()):
+        rev.setdefault(ch, bytes([b, i]))
+    return rev
+
+_KREV = None
+_REV = None
+
+# 탁음은 반드시 '기본가나 + 0x01' 로 써야 한다.
+# 완성형 탁음 슬롯(0xE6~, 0x06~0x1E)은 이 게임에서 제어 코드로 재활용되고 있어서,
+# 역매핑이 고른 완성형 코드를 그대로 내보내면 텍스트가 아니라 제어 바이트가 박힌다.
+from dump import DAKU
+DAKU_REV = {v: k for k, v in DAKU.items()}
+
 def encode(text, codes, base_table):
-    """번역문 -> ROM 바이트열"""
-    rev = {v: k for k, v in base_table.items()}
+    """번역문 -> ROM 바이트열.
+
+    같은 글리프가 단일바이트와 뱅크 양쪽에 있을 때는 단일바이트가 싸지만,
+    그 코드가 제어 범위(0x00~0x1F, 0xE0~)에 있으면 본문 중간에서 제어
+    바이트로 해석될 위험이 있다 (魔=0x00, 士=0x01, 見=0x02, 入=0x1F).
+    그래서 제어 범위 코드는 역매핑에서 빼고 뱅크 이스케이프를 쓴다.
+    제어 바이트로서 정말 필요하면 <魔> 같은 태그 표기로 쓴다.
+
+    제외 기준은 디코더와 같은 집합(dump.CTRL = 0x00~0x1F, 0xE6~)을 쓴다.
+    0xE0/0xE1(←→)은 실제 표시 글리프이므로 제외하지 않는다.
+    여러 코드가 공유하는 글리프(★ 등)도 제외한다 — 디코더가 태그로 내보내므로
+    판독문에 맨글자로 나올 일이 없고, 잘못된 코드를 고를 위험만 남는다.
+    """
+    global _KREV, _REV
+    if _KREV is None: _KREV = _kanji_rev()
+    if _REV is None:
+        from dump import CTRL as DEC_CTRL, ambiguous
+        skip = set(DEC_CTRL) | ambiguous(base_table)
+        _REV = {}
+        for code, g in base_table.items():
+            if code in skip: continue
+            _REV.setdefault(g, code)
+    rev = _REV
     out = bytearray()
     for kind, v in parse(text):
         if kind == "raw": out += v
@@ -105,10 +148,16 @@ def encode(text, codes, base_table):
             if v not in codes: raise KeyError(f"미배정 음절 {v!r}")
             out += codes[v]
         else:
+            if v in DAKU_REV:                   # 탁음 -> 기본가나 + 0x01
+                base = DAKU_REV[v]
+                if base in rev:
+                    out.append(rev[base]); out.append(0x01); continue
             ch = v if v in rev else ALIAS.get(v)
-            if ch is None or ch not in rev:
-                raise KeyError(f"테이블에 없는 문자 {v!r}")
-            out.append(rev[ch])
+            if ch is not None and ch in rev:
+                out.append(rev[ch]); continue
+            if v in _KREV:                      # 뱅크 한자 (판독문에서 옮겨온 것)
+                out += _KREV[v]; continue
+            raise KeyError(f"테이블에 없는 문자 {v!r}")
     return bytes(out)
 
 if __name__ == "__main__":

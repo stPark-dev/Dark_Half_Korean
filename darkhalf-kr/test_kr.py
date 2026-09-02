@@ -75,11 +75,44 @@ def main(rom_path):
         check("patch_all 정상 종료", r.returncode == 0 and os.path.exists(o), r.stderr[-200:])
 
     test_readable_safe(rom_path)
+    test_readable_roundtrip(rom_path)
 
     print()
     if FAIL:
         print(f"실패 {len(FAIL)}개: " + ", ".join(FAIL)); sys.exit(1)
     print("전부 통과")
+
+def test_readable_roundtrip(rom_path):
+    """모든 세그먼트에서 '판독문 -> 인코딩'이 원본 바이트와 일치하는지.
+
+    번역은 판독문을 복사해 일본어 구간만 교체하는 방식이다. 따라서 판독문의
+    비(非)한글 부분이 원본과 다른 바이트로 인코딩되면 조용히 깨진다.
+    이 검사가 없어서 뱅크 한자(降 등)를 옮겨 적은 세그먼트가 인코딩 불가로
+    터졌다 — krcodec 이 뱅크 한자를 되받도록 고친 뒤 이 불변식으로 지킨다.
+    """
+    import krcodec, pipeline
+    from dump import load_tbl, decode
+    from kanji import KANJI
+    tbl = load_tbl(os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl"))
+    rom = open(rom_path, 'rb').read()
+    segs, _, _, _ = pipeline.segments(rom)
+    bad_txt, bad_len = [], []
+    for sg in segs:
+        raw = rom[sg["addr"]:sg["addr"]+sg["len"]]
+        if not raw: continue
+        txt = decode(raw, tbl, KANJI)
+        try:
+            enc = krcodec.encode(txt, {}, tbl)
+        except KeyError as e:
+            bad_txt.append((sg["addr"], str(e))); continue
+        # 같은 글리프가 단일바이트와 뱅크 양쪽에 있으면 바이트는 달라질 수 있다.
+        # 지켜야 하는 것은 '표시가 같고 길이가 늘지 않는다' 이다.
+        if decode(enc, tbl, KANJI) != txt: bad_txt.append((sg["addr"], "표시 불일치"))
+        if len(enc) > len(raw): bad_len.append((sg["addr"], len(enc)-len(raw)))
+    print("[10] 전 세그먼트 판독문 왕복 (표시 보존 + 길이 비증가)")
+    check(f"표시 보존 {len(segs)}개", not bad_txt, f"실패 {len(bad_txt)}개 예: {bad_txt[:3]}")
+    check("길이 비증가", not bad_len, f"증가 {len(bad_len)}개 예: {bad_len[:3]}")
+
 
 def test_readable_safe(rom_path):
     """판독 컬럼의 태그/문자를 그대로 인코딩했을 때 원본 바이트가 보존되는지.
