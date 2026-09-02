@@ -27,19 +27,50 @@ def load_tbl(path):
         if len(k) == 2 and v: t[int(k, 16)] = v
     return t
 
-def decode(b, t):
+BANK_CH = {0xF5: 'A', 0xF6: 'B', 0xF7: 'C'}
+
+def ambiguous(t):
+    """여러 코드가 공유하는 글리프의 코드 집합.
+
+    판독 모드에서 이런 글리프를 문자로 렌더하면 번역문에 그대로 옮겼을 때
+    역매핑이 엉뚱한 코드를 고른다. 실제로 ★ 은 0xE2/0xE4/0xE5/0xFF 가
+    공유하고 역매핑은 0xFF(메시지 종료자)를 고르므로 메시지가 잘린다.
+    따라서 이런 코드는 판독 모드에서도 태그로 남긴다.
+    """
+    import collections
+    n = collections.Counter(t.values())
+    return {c for c, g in t.items() if n[g] > 1}
+
+def decode(b, t, kanji=None, amb=None):
+    """바이트열 -> 텍스트.
+
+    kanji 를 주면 뱅크 이스케이프를 실제 한자로 렌더한다 (판독용).
+    주지 않으면 <A05> 형태의 태그로 남긴다 (왕복 삽입용).
+    kanji 를 준 결과는 krcodec.encode 로 되돌아가지 않으므로 읽기 전용이다.
+    """
+    if kanji is not None and amb is None: amb = ambiguous(t)
+    amb = amb or set()
     out = []; i = 0
     while i < len(b):
         x = b[i]
-        if x == 0x01:
+        if kanji is not None and x in amb and x not in CTRL:
+            out.append(f"<{x:02X}>"); i += 1
+        elif x == 0x01:
             if out and out[-1] in DAKU: out[-1] = DAKU[out[-1]]
             else: out.append('<01>')
             i += 1
-        elif x in (0xF5, 0xF6) and i+1 < len(b):
-            out.append(f"<{'A' if x == 0xF5 else 'B'}{b[i+1]:02X}>"); i += 2
+        elif x in BANK_CH and i+1 < len(b):
+            if kanji is not None and (x, b[i+1]) in kanji:
+                out.append(kanji[(x, b[i+1])])
+            else:
+                out.append(f"<{BANK_CH[x]}{b[i+1]:02X}>")
+            i += 2
         elif x == 0xE3:
             out.append('\\n'); i += 1
         elif x in CTRL:
+            # 0x00-0x05 는 글리프(00=魔 01=士 02=見)이기도 하지만, 같은 코드가
+            # 메뉴/창 제어에도 쓰인다. 위치만으로 구분할 수 없으므로 판독 모드에서도
+            # 태그로 남긴다 — 번역 시 '보존해야 할 바이트'로 취급하는 편이 안전하다.
             out.append(f"<{x:02X}>"); i += 1
         else:
             out.append(t.get(x, f"[{x:02X}]")); i += 1

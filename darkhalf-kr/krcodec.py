@@ -26,12 +26,16 @@ def reclaimable():
     skip = KEEP | CTRL | (KANA if os.environ.get("DH_KEEP_KANA") == "1" else set())
     return sorted(c for c in range(0x20, 0xE0) if c not in skip)
 
-BANKS = [(0xF5, 256), (0xF6, 256)]     # 2바이트 이스케이프 뱅크
+# 2바이트 이스케이프 뱅크. F7 은 0x00~0x3D 까지만 폰트 데이터이고
+# 0x3E 이후에는 폰트가 아닌 다른 데이터가 있다 (글리프 렌더로 확인).
+# 그 위를 덮으면 롬이 깨지므로 62슬롯으로 제한한다.
+BANKS = [(0xF5, 256), (0xF6, 256), (0xF7, 62)]
+BANK_TAG = {'A': 0xF5, 'B': 0xF6, 'C': 0xF7}
 
 def capacity():
     return len(reclaimable()) + sum(n for _, n in BANKS)
 
-_TAG = re.compile(r"<([0-9A-Fa-f]{2})>|<([AB])([0-9A-Fa-f]{2})>|\\n")
+_TAG = re.compile(r"<([0-9A-Fa-f]{2})>|<([ABCabc])([0-9A-Fa-f]{2})>|\\n")
 
 def parse(text):
     """번역문 -> 토큰열. ('ch', 문자) 또는 ('raw', bytes)"""
@@ -42,7 +46,7 @@ def parse(text):
             if m.group(0) == "\\n": out.append(("raw", bytes([0xE3])))
             elif m.group(1): out.append(("raw", bytes([int(m.group(1), 16)])))
             else:
-                bank = 0xF5 if m.group(2).upper() == 'A' else 0xF6
+                bank = BANK_TAG[m.group(2).upper()]
                 out.append(("raw", bytes([bank, int(m.group(3), 16)])))
             i = m.end()
         else:
@@ -69,7 +73,8 @@ def allocate(texts, base_table, priority=()):
     single = reclaimable()
     if len(ordered) > capacity():
         raise SystemExit(f"고유 음절 {len(ordered)}자 > 수용량 {capacity()}자. "
-                         f"3번째 뱅크 추가(어셈블리 수정)가 필요합니다.")
+                         f"어휘를 줄여 고유 음절 수를 낮춰야 합니다 "
+                         f"(뱅크는 F5/F6/F7 이 전부이고 F7 은 62슬롯이 상한).")
     codes = {}; slots = []
     for c in single: slots.append(bytes([c]))
     for bank, n in BANKS:

@@ -52,14 +52,18 @@ def segments(rom):
 def cmd_export(rom_path, out):
     rom = open(rom_path, 'rb').read()
     t = load_tbl(TBL)
+    try:
+        from kanji import KANJI
+    except Exception:
+        KANJI = None
     segs, runs, ptrs, _ = segments(rom)
     with open(out, 'w', encoding='utf-8') as f:
-        f.write("#id\trun\taddr\tlen\tptrs\torig_hex\torig_text\ttranslation\n")
+        f.write("#id\trun\taddr\tlen\tptrs\torig_hex\torig_text\treadable\ttranslation\n")
         for i, s in enumerate(segs):
             raw = rom[s["addr"]:s["addr"]+s["len"]]
             f.write(f"{i}\t{s['run']}\t{s['addr']:#08x}\t{s['len']}\t"
                     f"{','.join(f'{p:#08x}' for p in s['ptrs'])}\t{raw.hex()}\t"
-                    f"{decode(raw, t)}\t\n")
+                    f"{decode(raw, t)}\t{decode(raw, t, KANJI)}\t\n")
     print(f"세그먼트 {len(segs)}개 (런 {len(runs)}개, 포인터 {len(ptrs)}개) -> {out}")
 
 def cmd_insert(rom_path, tsv, out):
@@ -73,7 +77,7 @@ def cmd_insert(rom_path, tsv, out):
     assert len(rows) == len(segs), f"행 수 불일치 {len(rows)} != {len(segs)}"
     import krcodec, json
     t = load_tbl(TBL)
-    trs = [c[7] if len(c) > 7 else "" for c in rows]
+    trs = [c[8] if len(c) > 8 else "" for c in rows]
     todo = [x for x in trs if x.strip()]
     codes, freq, st = krcodec.allocate(todo, t) if todo else ({}, {}, None)
     if st:
@@ -85,7 +89,7 @@ def cmd_insert(rom_path, tsv, out):
                   open(out + ".codes.json", "w"), ensure_ascii=False, indent=1)
     newbytes = []
     for c, sg in zip(rows, segs):
-        tr = c[7] if len(c) > 7 else ""
+        tr = c[8] if len(c) > 8 else ""
         newbytes.append(bytes.fromhex(c[5]) if not tr.strip()
                         else krcodec.encode(tr, codes, t))
     INPLACE = os.environ.get("DH_INPLACE") == "1"
@@ -132,13 +136,19 @@ def cmd_insert(rom_path, tsv, out):
     open(out, 'wb').write(rom)
     print(f"저장: {out}")
 
+FONT_BASE = {None: 0x2F0000, 0xF5: 0x2F4000, 0xF6: 0x2F8000, 0xF7: 0x2FC000}
+
 def patch_font(rom, codes):
     """배정된 음절의 글리프를 폰트 영역에 기록"""
     from makefont import encode as enc_glyph
-    FB, B5, B6 = 0x2F0000, 0x2F4000, 0x2F8000
     for ch, slot in codes.items():
-        a = FB + slot[0]*64 if len(slot) == 1 else \
-            (B5 if slot[0] == 0xF5 else B6) + slot[1]*64
+        if len(slot) == 1:
+            a = FONT_BASE[None] + slot[0]*64
+        else:
+            base = FONT_BASE.get(slot[0])
+            if base is None:
+                raise ValueError(f"알 수 없는 뱅크 {slot[0]:#02x} ({ch})")
+            a = base + slot[1]*64
         rom[a:a+64] = enc_glyph(ch)
 
 def fix_checksum(rom):
