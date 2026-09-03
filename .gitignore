@@ -20,3 +20,6 @@ darkhalf-kr/wram_write*.txt
 
 # vram.bin / cgram.bin 은 의도적으로 추적합니다.
 # 미해결 문제 4.1(메뉴 폰트)의 유일한 실증 자료이며 수동 덤프라 재생성이 어렵습니다.
+
+# 삽입 시 나오는 빌드 산물 (음절->코드 배정표)
+*.sfc.codes.json

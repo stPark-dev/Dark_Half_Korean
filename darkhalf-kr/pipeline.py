@@ -98,6 +98,26 @@ def cmd_insert(rom_path, tsv, out):
         print(f"번역 세그먼트 {len(pairs)}개 | 고유 음절 {st['unique']}/{st['capacity']}자")
         print(f"  단일바이트 배정 {st['single_slots']}자가 출현의 "
               f"{st['occ1']/(st['occ1']+st['occ2'])*100:.0f}% 담당 -> 평균 {st['avg_bytes']:.2f} 바이트/음절")
+        # 엔진 패치 필요 여부. $5D/$D5 프리픽스는 글리프 인덱스 1024~ 로,
+        # 엔진 패치를 적용하고 롬을 4MB 로 늘려야 그 자리가 존재한다
+        # (patch_engine.py, PROGRESS 1.2.2). 패치 없이 809자까지는 문제없다.
+        #
+        # 이 검사가 없으면 인벤토리가 809자를 넘는 순간 삽입이 조용히 성공하고
+        # 그 슬롯들만 엉뚱한 글리프로 나온다. 바이트 역검증도 통과한다
+        # (인코더 출력과 롬이 일치하므로). 그래서 여기서 막는다.
+        hi = sorted(ch for ch, sl in codes.items()
+                    if len(sl) == 2 and sl[0] in (0x5D, 0xD5))
+        if hi and len(rom) <= 0x300000:
+            print(f"!! 고유 음절이 엔진 패치 없는 상한(809자)을 넘었습니다.")
+            print(f"   $5D/$D5 슬롯을 받은 음절 {len(hi)}자: {''.join(hi[:20])}")
+            print(f"   patch_engine.py 로 4MB 확장한 롬을 원본으로 쓰거나,")
+            print(f"   DH_ENGINE=1 을 주어 이 자리에서 패치하십시오.")
+            sys.exit(1)
+        if os.environ.get("DH_ENGINE") == "1":
+            import patch_engine
+            rom = patch_engine.patch(rom)
+            print(f"엔진 패치 적용 (롬 {len(rom)}바이트)")
+
         patch_font(rom, codes)
         patch_words.apply(rom, codes, t, verbose=True)
         json.dump({ch: slot.hex() for ch, slot in codes.items()},

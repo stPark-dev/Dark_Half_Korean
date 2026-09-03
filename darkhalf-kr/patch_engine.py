@@ -183,8 +183,13 @@ def fix_checksum(rom):
     rom[0xFFDE] = c & 0xFF;    rom[0xFFDF] = c >> 8
 
 
-def apply(src, dst, verbose=True):
-    rom = bytearray(open(src, 'rb').read())
+def patch(rom, verbose=True):
+    """bytearray 를 제자리 패치. 4MB 확장까지 포함한다.
+
+    apply() 는 파일 경로를 받지만, 파이프라인은 이미 손질한 롬을 메모리에
+    들고 있으므로 그것을 그대로 넘길 수 있어야 한다. 그래서 인메모리
+    부분만 떼어 두었다. 체크섬은 호출자가 마지막에 맞춘다.
+    """
     log = []
 
     # 1) 4MB 확장
@@ -219,11 +224,16 @@ def apply(src, dst, verbose=True):
     rom[0x009548:0x009548+3] = b'\x4c' + (FREE_B & 0xFFFF).to_bytes(2, 'little')
     log.append(f"DMA 꼬리: 0x009548 -> JMP ${FREE_B & 0xFFFF:04X} ({len(tail)}바이트)")
 
-    fix_checksum(rom)
-    open(dst, 'wb').write(rom)
     if verbose:
         for l in log: print("  " + l)
-        print(f"저장: {dst}")
+    return rom
+
+
+def apply(src, dst, verbose=True):
+    rom = patch(bytearray(open(src, 'rb').read()), verbose=verbose)
+    fix_checksum(rom)
+    open(dst, 'wb').write(rom)
+    if verbose: print(f"저장: {dst}")
     return rom
 
 
