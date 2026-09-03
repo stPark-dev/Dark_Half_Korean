@@ -86,16 +86,20 @@ def cmd_insert(rom_path, tsv, out):
         c = line.rstrip('\n').split('\t')
         rows.append(c)
     assert len(rows) == len(segs), f"행 수 불일치 {len(rows)} != {len(segs)}"
-    import krcodec, tralloc, json
+    import krcodec, tralloc, json, words, patch_words
     t = load_tbl(TBL)
     trs = [c[8] if len(c) > 8 else "" for c in rows]
     pairs = [(int(c[3]), x) for c, x in zip(rows, trs) if x.strip()]
-    codes, freq, st = tralloc.allocate(pairs, t) if pairs else ({}, {}, None)
+    # 단어표(<EB>xx)의 한국어도 음절 인벤토리에 넣어야 코드가 배정된다.
+    wtexts = words.texts()
+    codes, freq, st = (tralloc.allocate(pairs, t, extra=wtexts)
+                       if pairs else ({}, {}, None))
     if st:
         print(f"번역 세그먼트 {len(pairs)}개 | 고유 음절 {st['unique']}/{st['capacity']}자")
         print(f"  단일바이트 배정 {st['single_slots']}자가 출현의 "
               f"{st['occ1']/(st['occ1']+st['occ2'])*100:.0f}% 담당 -> 평균 {st['avg_bytes']:.2f} 바이트/음절")
         patch_font(rom, codes)
+        patch_words.apply(rom, codes, t, verbose=True)
         json.dump({ch: slot.hex() for ch, slot in codes.items()},
                   open(out + ".codes.json", "w"), ensure_ascii=False, indent=1)
     newbytes = []

@@ -32,9 +32,14 @@ def _syl_and_fixed(text, tbl):
             except KeyError: fixed += 1
     return syl, fixed
 
-def allocate(pairs, tbl):
-    """pairs: [(용량바이트, 번역문)]. 반환: krcodec.allocate 와 동일."""
-    texts = [t for _, t in pairs]
+def allocate(pairs, tbl, extra=()):
+    """pairs: [(용량바이트, 번역문)]. 반환: krcodec.allocate 와 동일.
+
+    extra 는 예산 제약이 없는 문자열들(단어표 등)이다. 음절 인벤토리에는
+    들어가야 하지만 우선 배정을 받을 이유가 없다. 단어표는 0xFF 채움
+    여유가 넉넉한 구간에 있어 길이가 문제되지 않기 때문이다.
+    """
+    texts = [t for _, t in pairs] + list(extra)
     scored = []
     for cap, t in pairs:
         syl, fixed = _syl_and_fixed(t, tbl)

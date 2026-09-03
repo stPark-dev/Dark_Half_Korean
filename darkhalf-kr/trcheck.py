@@ -34,7 +34,11 @@ def report(tsv, worst=12):
     import tralloc
     texts = [t for _, _, t in done]
     try:
-        codes, freq, st = tralloc.allocate([(cap, t) for _, cap, t in done], tbl)
+        # 단어표(<EB>xx)의 한국어도 인벤토리에 들어간다. pipeline 과 같은 입력을
+        # 써야 예산 초과 예측이 실제 삽입과 일치한다.
+        import words
+        codes, freq, st = tralloc.allocate([(cap, t) for _, cap, t in done], tbl,
+                                           extra=words.texts())
     except SystemExit as e:
         print(f"\n!! 배정 불가: {e}")
         uniq = {v for t in texts for k, v in krcodec.parse(t)
@@ -76,6 +80,22 @@ def report(tsv, worst=12):
         for i, ch, ctx in leftover[:worst]:
             print(f"   #{i}: {ch}   …{ctx}…")
 
+    # 단어표 뒤 조사 일치 검사.
+    # <EB>xx 는 런타임에 단어를 끼워 넣으므로, 삽입되는 단어의 종성에 따라
+    # 뒤 조사의 형태가 갈린다. 단어표를 해독하기 전에는 알 수 없어서
+    # 「파티아을」 「소울파워이」 「마물가」 가 그대로 들어가 있었다.
+    import wordfix
+    jbad, jman = wordfix.scan([(i, t) for i, _, t in done], tbl)
+    if jbad:
+        print(f"\n!! 단어표 뒤 조사 불일치 {len(jbad)}건"
+              f"  (wordfix.py --write 로 일괄 수정)")
+        for sid, w, want, _, ctx in jbad[:worst]:
+            print(f"   #{sid}: {w} -> {want}   …{ctx}…")
+    if jman:
+        print(f"\n?? 호격/계사 '아·야' 손판단 {len(jman)}건")
+        for sid, w, alt, ctx in jman[:worst]:
+            print(f"   #{sid}: {w}   …{ctx}…")
+
     # 고아 프리픽스 검사.
     # 원문의 <F4><魔> 같은 이스케이프는 두 태그가 한 글리프를 이룬다.
     # 悪<F4><魔> 를 '악마' 로 옮길 때 <魔> 만 지우고 <F4> 를 남기면,
@@ -114,8 +134,9 @@ def report(tsv, worst=12):
         print(f"\n!! 예산 초과 세그먼트 {len(over)}개 / {len(done)}개")
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
-    if not over and not bad and not leftover and not orphan:
-        print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0, 고아 프리픽스 0")
+    if not over and not bad and not leftover and not orphan and not jbad:
+        print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0,"
+              f" 고아 프리픽스 0, 조사 불일치 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
@@ -153,7 +174,7 @@ def report(tsv, worst=12):
     tail = sorted(c for c in freq if freq[c] <= 2)
     print(f"출현 1~2회 음절 {len(tail)}자 (이 음절들을 기존 음절로 바꾸면 여유가 생긴다)")
     if tail: print("  " + "".join(tail[:80]))
-    return 1 if (over or bad or leftover or orphan) else 0
+    return 1 if (over or bad or leftover or orphan or jbad) else 0
 
 if __name__ == "__main__":
     a = sys.argv[1:]
