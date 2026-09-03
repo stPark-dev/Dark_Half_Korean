@@ -69,10 +69,16 @@ def main(orig_p, new_p, tsv):
     WORD_PTR = (words.PTR_TABLE, words.PTR_TABLE + 2*words.COUNT)
     WORD_STR = (words.DATA, words.DATA_LIMIT)
 
+    # 설명문 구간. build.py 가 대사와 같은 배정으로 함께 넣는다.
+    from patch_desc import find_runs, KO as DESC, PREFIX
+    druns = find_runs(orig)
+    DESC_R = [(druns[i][0] + PREFIX, druns[i][0] + druns[i][1]) for i in DESC]
+
     out = [i for i in range(len(orig)) if orig[i] != new[i]
            and not (TEXT[0] <= i < TEXT[1]) and not (FONT[0] <= i < FONT[1])
            and not (WORD_PTR[0] <= i < WORD_PTR[1])
            and not (WORD_STR[0] <= i < WORD_STR[1])
+           and not any(a <= i < b for a, b in DESC_R)
            and not (0xFFDC <= i <= 0xFFDF)]
     print(f"[5] 허용 영역 밖 변경 {len(out)}바이트"); fail += len(out)
 
