@@ -47,7 +47,8 @@ $6A 는 0x9552 의 STA $69 (16비트) 에서 덮인다. 그래서 뱅크 계산�
 import sys, os
 
 ROM_4MB = 4 * 1024 * 1024
-FREE_A  = 0x00F200      # 이스케이프 판별 (뱅크 $C0, addr $F200)
+FREE_A  = 0x00F200      # 이스케이프 판별 — 메인 대사 렌더러 (뱅크 $C0)
+FREE_C  = 0x00F260      # 이스케이프 판별 — 옵션/엔딩 렌더러 ($5CFA 용)
 FREE_B  = 0x00F300      # DMA 꼬리      (뱅크 $C0, addr $F300)
 NEWFONT = 0x300000      # 뱅크 $F0 = 인덱스 1024~
 
@@ -113,6 +114,31 @@ def escape_patch(org, next_byte_jsr, store_hi_jmp, single_jmp):
     ], org)
 
 
+def escape_patch_5cfa(org):
+    """$5CFA 확장판.
+
+    $5CFA 는 바이트를 A 로 받는다 ($5CF1 의 반환값). 그리고 상위 바이트를
+    직접 $01 에 저장한 뒤 다음 바이트를 읽어 $00 에 넣는다 — $950F 쪽과
+    구조가 달라 따로 만든다.
+    """
+    return asm([
+        b'\xc9' + bytes([PFX4]), b'\xf0', ('rel','p4'),
+        b'\xc9' + bytes([PFX5]), b'\xf0', ('rel','p5'),
+        b'\xc9\xf8', b'\xb0', ('rel','sng'),
+        b'\xc9\xf4', b'\x90', ('rel','sng'),
+        b'\x29\x03',                              # AND #$03
+        b'\x80', ('rel','tail'),
+        ('label','p4'), b'\xa9\x04', b'\x80', ('rel','tail'),
+        ('label','p5'), b'\xa9\x05',
+        ('label','tail'),
+        b'\x85\x01',                              # STA $01  인덱스 상위
+        b'\x20\xf1\x5c',                         # JSR $5CF1  다음 바이트
+        b'\x85\x00',                              # STA $00  인덱스 하위
+        b'\x60',                                   # RTS
+        ('label','sng'), b'\x4c\x0c\x5d',        # JMP $5D0C  단일바이트 경로
+    ], org)
+
+
 def dma_tail():
     """0x9548 이후 꼬리 재구성. 뱅크를 $6A 에서 계산해 먼저 저장한다."""
     return (
@@ -167,7 +193,9 @@ def apply(src, dst, verbose=True):
         log.append(f"롬 확장 -> {len(rom)}바이트 (4MB)")
 
     # 2) 빈 공간 확인 (덮어쓰기 사고 방지)
-    for a, n, name in ((FREE_A, 0x60, "이스케이프 판별"), (FREE_B, 0x40, "DMA 꼬리")):
+    for a, n, name in ((FREE_A, 0x60, "이스케이프 판별 A"),
+                       (FREE_B, 0x60, "DMA 꼬리"),
+                       (FREE_C, 0x40, "이스케이프 판별 C")):
         blk = rom[a:a+n]
         if any(b != 0xFF for b in blk):
             raise SystemExit(f"!! {name} 자리 {a:#08x} 가 비어 있지 않습니다")
@@ -178,6 +206,12 @@ def apply(src, dst, verbose=True):
     rom[FREE_A:FREE_A+len(code)] = code
     rom[0x00950F:0x00950F+3] = b'\x4c' + (FREE_A & 0xFFFF).to_bytes(2, 'little')
     log.append(f"이스케이프 판별: 0x00950F -> JMP ${FREE_A & 0xFFFF:04X} ({len(code)}바이트)")
+
+    # 3b) 이스케이프 판별 확장 — 옵션/엔딩 렌더러 ($5CFA)
+    code_c = escape_patch_5cfa(FREE_C)
+    rom[FREE_C:FREE_C+len(code_c)] = code_c
+    rom[0x005CFA:0x005CFA+3] = b'\x4c' + (FREE_C & 0xFFFF).to_bytes(2, 'little')
+    log.append(f"이스케이프 판별($5CFA): 0x005CFA -> JMP ${FREE_C & 0xFFFF:04X} ({len(code_c)}바이트)")
 
     # 4) DMA 꼬리 재구성 — 뱅크 = $EF + ($6A >> 2)
     tail = dma_tail()

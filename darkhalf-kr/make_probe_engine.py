@@ -26,6 +26,12 @@ PROBE_BYTES = bytes([0xFA, 0x01,          # 창 제어 (원본과 동일)
                      0xD5, 0x00,          # 프리픽스 5 + 인덱스 0 -> 1280
                      0x21])               # ！
 
+# 프로브를 심을 설명문 본문 (마법 -> 설명 에서 바로 보인다)
+#   PREFIX=9 바이트가 마법 이름, 그 뒤가 본문
+DESC_SPOTS = [(0x05b512, 26), (0x05b52d, 24), (0x05b546, 37)]
+DESC_PREFIX = 9
+
+
 def main(src, dst, tsv):
     global PROBE_ADDR, PROBE_LEN
     for line in open(tsv, encoding='utf-8'):
@@ -47,7 +53,15 @@ def main(src, dst, tsv):
     # 프로브 메시지 삽입 (남는 자리는 공백)
     rom[PROBE_ADDR:PROBE_ADDR+PROBE_LEN] = (
         PROBE_BYTES + b'\x20' * (PROBE_LEN - len(PROBE_BYTES)))
-    print(f"  프로브: {PROBE_ADDR:#08x} ({PROBE_LEN}바이트) <- {PROBE_BYTES.hex()}")
+    print(f"  프로브(아이템 창): {PROBE_ADDR:#08x} ({PROBE_LEN}바이트)")
+
+    # 설명문 본문에도 심는다 — 마법 -> 설명 에서 바로 확인 가능
+    body = bytes([0x5D, 0x00, 0xD5, 0x00, 0x21])      # 한 글 ！
+    for ad, ln in DESC_SPOTS:
+        cap = ln - DESC_PREFIX
+        assert len(body) <= cap, f"{ad:#x} 예산 초과"
+        rom[ad+DESC_PREFIX:ad+ln] = body + b'\x20' * (cap - len(body))
+        print(f"  프로브(설명문): {ad+DESC_PREFIX:#08x} ({cap}바이트)")
 
     patch_engine.fix_checksum(rom)
     open(dst, 'wb').write(rom)
