@@ -87,10 +87,17 @@ def parse(text):
 def is_hangul(ch):
     return 0xAC00 <= ord(ch) <= 0xD7A3
 
-def allocate(texts, base_table, priority=()):
+def allocate(texts, base_table, priority=(), force=()):
     """번역문들에서 음절 빈도를 세어 코드 배정.
     priority 에 든 문자열의 음절은 단일바이트를 먼저 받는다.
     (메뉴 라벨처럼 예산이 3~8바이트로 빡빡한 곳을 우선 보장)
+
+    force 는 음절 집합이고 priority 보다 앞선다. 단어표·이름표처럼 원본
+    칸이 2~4바이트로 고정돼 모든 음절이 단일바이트여야만 들어가는 자리에
+    쓴다. priority 만으로는 부족하다 — 우선 집합의 음절 수가 단일바이트
+    칸(143)보다 많으면 그 안에서 다시 빈도순으로 밀리고, 표에 쓰는 음절은
+    희귀해서 매번 밀린다.
+
     반환: {문자: bytes}, 빈도, 통계"""
     freq = {}
     for t in texts:
@@ -100,7 +107,8 @@ def allocate(texts, base_table, priority=()):
     for t in priority:
         for kind, v in parse(t):
             if kind == "ch" and is_hangul(v): pri.add(v)
-    ordered = sorted(freq, key=lambda c: (c not in pri, -freq[c]))
+    fs = set(force)
+    ordered = sorted(freq, key=lambda c: (c not in fs, c not in pri, -freq[c]))
     single = reclaimable()
     if len(ordered) > capacity():
         raise SystemExit(f"고유 음절 {len(ordered)}자 > 수용량 {capacity()}자. "

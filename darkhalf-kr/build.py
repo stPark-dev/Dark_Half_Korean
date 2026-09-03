@@ -51,6 +51,7 @@ def load_tsv(tsv):
 
 def main(src, tsv, dst, engine=False):
     rom = bytearray(open(src, 'rb').read())
+    orig = bytes(rom)          # 칸 계산은 원본 배치로만 해야 한다
     t = load_tbl(TBL)
     rows = load_tsv(tsv)
     segs = pipeline.segments(bytes(rom))[0]
@@ -62,9 +63,28 @@ def main(src, tsv, dst, engine=False):
                   for i, txt in DESC.items()]
     dlg = [(int(c[3]), c[8]) for c in rows if len(c) > 8 and c[8].strip()]
 
-    pairs = dlg + [(cap, txt) for _, cap, txt in desc_items]
-    codes, freq, st = tralloc.allocate(pairs, t,
-                                       extra=words.texts() + nametbl.texts())
+    # 단어표·이름표는 원본 칸이 좁다 (腕輪 는 2바이트). extra 로 넘기면 우선
+    # 배정을 못 받아 2바이트 코드가 걸리고 칸을 넘긴다. 용량과 함께 pairs 로
+    # 넘겨 우선 배정 대상에 들어가게 한다.
+    pairs = (dlg + [(cap, txt) for _, cap, txt in desc_items]
+             + words.pairs(orig) + nametbl.pairs(orig))
+    # 표 항목이 원본 칸에 안 들어가면, 그 항목의 음절만 절대 우선으로 돌려
+    # 다시 배정한다. 실패가 없어질 때까지 반복하므로 필요한 최소만 강제한다.
+    # 표 전체 음절은 129자인데 단일바이트 칸이 143 뿐이라, 전부 강제하면
+    # 대사 쪽에 남는 칸이 14개가 되어 예산이 무너진다.
+    force = set()
+    for _ in range(8):
+        codes, freq, st = tralloc.allocate(pairs, t, force=force)
+        probe = bytearray(orig)
+        miss = ([kr for _, kr, _, _ in patch_words.apply(probe, codes, t)]
+                + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)])
+        if not miss: break
+        for kr in miss:
+            for kind, v in krcodec.parse(kr):
+                if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+    if force:
+        print(f"표 칸을 맞추려 절대 우선으로 돌린 음절 {len(force)}자: "
+              f"{''.join(sorted(force))}")
     print(f"배정: 고유 음절 {st['unique']}/{st['capacity']}자 | "
           f"단일바이트 {st['single_slots']}자가 출현의"
           f" {st['occ1']/(st['occ1']+st['occ2'])*100:.0f}% | "
@@ -115,8 +135,15 @@ def main(src, tsv, dst, engine=False):
     # 세그먼트 #1295 다. 그 세그먼트는 미번역이므로 위에서 원본 바이트를
     # 되쓴다. 이름표를 먼저 쓰면 그 되쓰기에 덮인다.
     # 실제로 처음에는 이 순서 때문에 [7] 이 17건 전부 불일치였다.
-    patch_words.apply(rom, codes, t, verbose=True)
-    patch_names.apply(rom, codes, t, verbose=True)
+    wover = patch_words.apply(rom, codes, t, verbose=True)
+    nover = patch_names.apply(rom, codes, t, verbose=True)
+    if wover or nover:
+        print(f"!! 표 칸 초과 {len(wover)+len(nover)}개 (제자리라 늘릴 수 없다)")
+        for k, kr, n, cap in wover:
+            print(f"   단어표 [{k:02X}] {kr!r}: {n}/{cap}바이트")
+        for nm, k, kr, n, cap in nover:
+            print(f"   {nm} [{k:02X}] {kr!r}: {n}/{cap}바이트")
+        sys.exit(1)
 
     pipeline.fix_checksum(rom)
     open(dst, 'wb').write(rom)

@@ -100,13 +100,13 @@ def main(orig_p, new_p, tsv):
     print(f"[5] 허용 영역 밖 변경 {len(out)}바이트"); fail += len(out)
 
     # 포인터를 실제로 따라가 되읽는다. 포인터와 문자열이 함께 옳아야 통과한다.
-    wbad = patch_words.verify(new, codes, tbl)
-    print(f"[6] 단어표 포인터 왕복: 불일치 {len(wbad)}개"
-          + (f" {[(hex(k), kr) for k, kr, _, _ in wbad[:4]]}" if wbad else ""))
+    wbad = patch_words.verify(new, orig, codes, tbl)
+    print(f"[6] 단어표 제자리·포인터 무변경: 불일치 {len(wbad)}개"
+          + (f" {[(hex(k), kr) for _, k, kr, _, _ in wbad[:4]]}" if wbad else ""))
     fail += len(wbad)
 
-    nbad = patch_names.verify(new, codes, tbl)
-    print(f"[7] 이름표 포인터 왕복: 불일치 {len(nbad)}개"
+    nbad = patch_names.verify(new, orig, codes, tbl)
+    print(f"[7] 이름표 제자리·포인터 무변경: 불일치 {len(nbad)}개"
           + (f" {[(nm, hex(k), kr) for nm, k, kr, _, _ in nbad[:4]]}" if nbad else ""))
     fail += len(nbad)
 

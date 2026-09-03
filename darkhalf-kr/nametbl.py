@@ -11,6 +11,17 @@ words.py 의 단어표와 같은 형식이다. 포인터는 뱅크 내 오프셋
 한글 잡음으로 렌더된다. 마법 이름이 「말들해만되士당입」 으로 나오면
 어떤 화면도 판독할 수 없다.
 
+## 왜 옮기면 안 되는가 (제자리 고정)
+
+마법 문자열을 가리키는 표가 하나가 아니다.
+  0x040300  포인터 표 (2바이트 간격)
+  0x04f139  레코드 표 (4바이트 간격, 이름 포인터 + 다른 포인터)
+  0x05b517  설명문 본문이 「F0 C4 <포인터>」 로 이름 주소를 직접 박아 쓴다
+
+처음에는 문자열을 재배치하고 0x040300 만 고쳤다. 나머지 둘이 어긋나
+메뉴에서 게임이 멈췄다. 그래서 각 엔트리는 원본 시작 주소를 지키고
+포인터 표는 건드리지 않는다.
+
 ## 마법 이름 (구조 확정)
 
   포인터 표  0x040300  18엔트리 x 2바이트
@@ -79,6 +90,26 @@ SPELL_WORDS = [
 assert len(SPELL_WORDS) == SPELL["count"]
 
 TABLES = [(SPELL, SPELL_WORDS)]
+
+
+def slots(rom, spec):
+    """원본 엔트리의 (시작주소, 쓸 수 있는 바이트). 마지막 1바이트는 종료자."""
+    st, i = [], spec["data"]
+    for _ in range(spec["count"]):
+        st.append(i); j = i
+        while rom[j] != 0xFF: j += 1
+        i = j + 1
+    st.append(i)
+    return [(st[k], st[k+1] - st[k] - 1) for k in range(spec["count"])]
+
+
+def pairs(rom):
+    """(용량, 한국어) — 예산 우선 배정용."""
+    out = []
+    for spec, wl in TABLES:
+        for (a, cap), (_, kr) in zip(slots(rom, spec), wl):
+            if kr: out.append((cap, kr))
+    return out
 
 
 def texts():

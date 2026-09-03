@@ -1,80 +1,53 @@
 #!/usr/bin/env python3
-"""단어표 한글화 — <EB>xx 가 가리키는 56개 단어를 한국어로 바꾼다.
+"""단어표 한글화 — 원본 자리에 그대로 덮어쓴다.
 
-구조와 근거는 words.py 주석에 있다. 요약하면 포인터 표 56개(0x05c0a6)가
-0xFF 종료 문자열들(0x05c11a~)을 가리키고, 뒤에 0xFF 채움 여유가 넉넉하다.
-그래서 길이를 자유롭게 바꾸고 포인터만 다시 써 주면 된다.
+## 제자리여야 하는 이유
 
-원본 바이트를 먼저 스냅샷한다. 새 문자열을 같은 구간에 순차로 쓰기 때문에,
-'원문 유지' 엔트리를 나중에 읽으면 이미 덮인 것을 읽게 된다.
+포인터 표 0x05c0a6 만 이 문자열들을 가리키는 것이 아니다. 설명문 본문이
+「F0 C4 <포인터>」 형태로 단어 주소를 직접 박아 쓴다. 처음에는 문자열을
+재배치하고 포인터 표만 고쳤는데, 그 결과 메뉴에서 게임이 멈췄다.
+
+그래서 각 엔트리는 원본 시작 주소를 지키고 포인터 표는 건드리지 않는다.
+칸이 좁으므로 이 항목들은 예산 우선 배정을 받아야 한다 (words.pairs()).
 """
 import os, sys, struct
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import words, krcodec
 
-# 포인터 값은 뱅크 내 오프셋 그 자체다. HiROM 뱅크 $C5 의 주소 $C11A 가
-# ROM 0x05C11A 이므로 값에 0x8000 을 따로 씌우거나 벗기면 안 된다.
-BANK = words.DATA & ~0xFFFF
-
-
-def read_original(rom):
-    """엔트리별 원본 바이트 (0xFF 종료자 제외)."""
-    out, i = [], words.DATA
-    for _ in range(words.COUNT):
-        j = i
-        while rom[j] != 0xFF: j += 1
-        out.append(bytes(rom[i:j])); i = j + 1
-    return out
-
 
 def apply(rom, codes, tbl, verbose=False):
-    """rom(bytearray) 을 제자리 수정. 반환: (사용 끝 주소, 바이트 수)"""
-    orig = read_original(rom)
-    blobs = []
-    for k, (ja, kr) in enumerate(words.WORDS):
-        if kr is None:
-            blobs.append(orig[k])
-        else:
-            try:
-                blobs.append(krcodec.encode(kr, codes, tbl))
-            except KeyError as e:
-                raise SystemExit(f"단어표 [{k:02X}] {kr!r} 인코딩 불가: {e}")
-
-    # 문자열 순차 배치 + 포인터 갱신
-    addr = words.DATA
-    ptrs = []
-    for b in blobs:
-        ptrs.append(addr - BANK)
+    """제자리 덮어쓰기. 반환: 넘친 항목 목록(비어야 정상)."""
+    over = []
+    for k, ((addr, cap), (ja, kr)) in enumerate(zip(words.slots(rom), words.WORDS)):
+        if kr is None: continue
+        try:
+            b = krcodec.encode(kr, codes, tbl)
+        except KeyError as e:
+            raise SystemExit(f"단어표 [{k:02X}] {kr!r} 인코딩 불가: {e}")
+        if len(b) > cap:
+            over.append((k, kr, len(b), cap)); continue
         rom[addr:addr+len(b)] = b
         rom[addr+len(b)] = 0xFF
-        addr += len(b) + 1
-    if addr > words.DATA_LIMIT:
-        raise SystemExit(f"단어표가 상한 초과 {addr:#08x} > {words.DATA_LIMIT:#08x}")
-    # 남은 원본 자리를 0xFF 로 지운다 (짧아졌을 때 옛 바이트가 남지 않게)
-    old_end = words.DATA
-    for b in orig: old_end += len(b) + 1
-    for a in range(addr, max(addr, old_end)): rom[a] = 0xFF
-
-    for k, p in enumerate(ptrs):
-        struct.pack_into("<H", rom, words.PTR_TABLE + 2*k, p)
-
-    used = addr - words.DATA
-    if verbose:
-        print(f"단어표: {len(blobs)}엔트리 / {used}바이트 "
-              f"({words.DATA:#08x}~{addr:#08x}, 원본 {old_end-words.DATA}바이트)")
-    return addr, used
+        # 남는 칸은 0xFF 로 채운다. 종료자 뒤라 표시에 영향이 없고,
+        # 옛 일본어 바이트가 남아 다른 참조에 읽히는 일을 막는다.
+        for a in range(addr+len(b)+1, addr+cap+1): rom[a] = 0xFF
+    if verbose and not over:
+        print(f"단어표: {sum(1 for _, kr in words.WORDS if kr)}엔트리 제자리 삽입 "
+              f"(포인터 표 {words.PTR_TABLE:#08x} 무변경)")
+    return over
 
 
-def verify(rom, codes, tbl):
-    """포인터가 가리키는 곳을 되읽어 기대 바이트와 같은지 확인."""
+def verify(rom, orig, codes, tbl):
+    """문자열이 원본 주소에 옳게 있고, 포인터 표가 그대로인지 확인."""
     bad = []
-    for k, (ja, kr) in enumerate(words.WORDS):
-        p = struct.unpack_from("<H", rom, words.PTR_TABLE + 2*k)[0]
-        a = BANK + p
-        j = a
+    for k, ((addr, cap), (ja, kr)) in enumerate(zip(words.slots(orig), words.WORDS)):
+        if kr is None: continue
+        j = addr
         while rom[j] != 0xFF: j += 1
-        got = bytes(rom[a:j])
-        if kr is not None:
-            want = krcodec.encode(kr, codes, tbl)
-            if got != want: bad.append((k, kr, got.hex(), want.hex()))
+        got = bytes(rom[addr:j])
+        want = krcodec.encode(kr, codes, tbl)
+        if got != want: bad.append(("단어표", k, kr, got.hex(), want.hex()))
+    n = 2 * words.COUNT
+    if bytes(rom[words.PTR_TABLE:words.PTR_TABLE+n]) != bytes(orig[words.PTR_TABLE:words.PTR_TABLE+n]):
+        bad.append(("단어표", -1, "포인터 표가 바뀌었다", "", ""))
     return bad
