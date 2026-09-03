@@ -12,7 +12,7 @@ from makefont import encode as enc_glyph
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
-FB, BANKS = 0x2F0000, {0xF5: 0x2F4000, 0xF6: 0x2F8000, 0xF7: 0x2FC000}
+from pipeline import FONT_BASE, patch_font   # 폰트 주소 계산은 한 곳에서만
 
 # (주소, 원본 바이트 길이, 한국어)  — <ED>出 뒤 라벨 구간
 MENU = [
@@ -52,7 +52,7 @@ def main(src, dst):
         sys.exit(1)
 
     for ch, slot in codes.items():
-        a = FB + slot[0]*64 if len(slot) == 1 else BANKS[slot[0]] + slot[1]*64
+        a = FONT_BASE[None] + slot[0]*64 if len(slot) == 1 else FONT_BASE[slot[0]] + slot[1]*64
         rom[a:a+64] = enc_glyph(ch)
     rom[0xFFDC]=rom[0xFFDD]=0xFF; rom[0xFFDE]=rom[0xFFDF]=0x00
     c=(sum(rom[:0x200000])+2*sum(rom[0x200000:0x300000]))&0xFFFF; comp=c^0xFFFF

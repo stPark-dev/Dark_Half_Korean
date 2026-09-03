@@ -50,6 +50,17 @@ def segments(rom):
     return out, runs, ptrs, (lo, hi)
 
 def cmd_export(rom_path, out):
+    # 번역이 들어 있는 TSV 를 덮어쓰면 작업이 날아간다. 실제로 한 번 날렸다.
+    if os.path.exists(out) and os.environ.get("DH_FORCE_EXPORT") != "1":
+        n = 0
+        for line in open(out, encoding='utf-8'):
+            if line.startswith('#'): continue
+            c = line.rstrip('\n').split('\t')
+            if len(c) > 8 and c[8].strip(): n += 1
+        if n:
+            print(f"!! {out} 에 번역 {n}개가 있습니다. 덮어쓰지 않았습니다.")
+            print("   정말 다시 추출하려면 DH_FORCE_EXPORT=1 을 주세요.")
+            sys.exit(1)
     rom = open(rom_path, 'rb').read()
     t = load_tbl(TBL)
     try:
@@ -136,7 +147,10 @@ def cmd_insert(rom_path, tsv, out):
     open(out, 'wb').write(rom)
     print(f"저장: {out}")
 
-FONT_BASE = {None: 0x2F0000, 0xF5: 0x2F4000, 0xF6: 0x2F8000, 0xF7: 0x2FC000}
+# 글리프 인덱스 = (프리픽스 & 3) * 256 + 둘째 바이트  (렌더러 $5CFA)
+# 따라서 F4 는 단일바이트와 같은 영역(인덱스 0~255)을 가리킨다.
+FONT_BASE = {None: 0x2F0000, 0xF4: 0x2F0000,
+             0xF5: 0x2F4000, 0xF6: 0x2F8000, 0xF7: 0x2FC000}
 
 def patch_font(rom, codes):
     """배정된 음절의 글리프를 폰트 영역에 기록"""

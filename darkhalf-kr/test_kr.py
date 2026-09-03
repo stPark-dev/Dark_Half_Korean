@@ -14,7 +14,7 @@ def check(name, cond, detail=""):
 def main(rom_path):
     rom = open(rom_path, 'rb').read()
     import krcodec, makefont, pipeline
-    from dump import load_tbl
+    from dump import load_tbl, decode
     tbl = load_tbl(os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl"))
 
     print("[1] 뱅크 정의 — F7 은 0x3E 이후가 폰트 데이터가 아니다")
@@ -23,10 +23,12 @@ def main(rom_path):
     check("F6 뱅크 256슬롯", banks.get(0xF6) == 256, f"{banks.get(0xF6)}")
     check("F7 뱅크 96슬롯 (0x00-0x3D + 0xDE-0xFF)", banks.get(0xF7) == 96, f"{banks.get(0xF7)}")
 
+    check("F4 뱅크 58슬롯 (0x00-0x1F + 0xE6-0xFF)", banks.get(0xF4) == 58, f"{banks.get(0xF4)}")
+
     print("[2] 수용량")
     os.environ.pop("DH_KEEP_KANA", None)
     check("단일바이트 회수 145개", len(krcodec.reclaimable()) == 145, f"{len(krcodec.reclaimable())}")
-    check("전면 번역 수용량 753자", krcodec.capacity() == 753, f"{krcodec.capacity()}")
+    check("전면 번역 수용량 811자", krcodec.capacity() == 811, f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"
     check("가나 보존 시 단일바이트 34개", len(krcodec.reclaimable()) == 34, f"{len(krcodec.reclaimable())}")
     os.environ.pop("DH_KEEP_KANA", None)
@@ -57,6 +59,9 @@ def main(rom_path):
     check("개행 \\n -> 0xE3", krcodec.encode("\\n", codes, tbl) == b'\xe3')
     check("뱅크 태그 <A05> -> F5 05", krcodec.encode("<A05>", codes, tbl) == b'\xf5\x05')
     check("뱅크 태그 <C05> -> F7 05", krcodec.encode("<C05>", codes, tbl) == b'\xf7\x05')
+    check("뱅크 태그 <D02> -> F4 02", krcodec.encode("<D02>", codes, tbl) == b'\xf4\x02')
+    check("F4 02 는 見 로 읽힌다", decode(b'\xf4\x02', tbl, {}) == '見')
+    check("★ 은 F4 로 인코딩", krcodec.encode("★", codes, tbl)[:1] == b'\xf4')
 
     print("[6] 폰트 인코더 왕복")
     ok = all(makefont.glyph_to_rows(makefont.encode(c)) == makefont.render_rows(c)

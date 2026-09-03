@@ -32,13 +32,18 @@ def reclaimable():
 #   0x3E-0xDD  정체 불명 데이터 160개  -> 덮으면 무엇이 깨지는지 미확인. 쓰지 않는다
 #   0xDE-0xFF  0xFF 채움 34개          -> 미사용이므로 안전
 # 자세한 근거는 PROGRESS.md 1.2.1 / 2.4.
+# F4 는 인덱스 0~255 로, 단일바이트로는 쓸 수 없는 제어 범위 인덱스에 닿는다.
+#   0x20-0xDF 는 단일바이트로 이미 쓰므로 F4 로 중복 배정하지 않는다.
+#   0xE0-0xE5 는 화살표(←→)와 ★ 로 UI 에 쓰이므로 보존한다.
+F4_SLOTS = list(range(0x00, 0x20)) + list(range(0xE6, 0x100))
 BANK_SLOTS = {
+    0xF4: F4_SLOTS,
     0xF5: list(range(0, 256)),
     0xF6: list(range(0, 256)),
     0xF7: list(range(0x00, 0x3E)) + list(range(0xDE, 0x100)),
 }
 BANKS = [(b, len(v)) for b, v in BANK_SLOTS.items()]
-BANK_TAG = {'A': 0xF5, 'B': 0xF6, 'C': 0xF7}
+BANK_TAG = {'D': 0xF4, 'A': 0xF5, 'B': 0xF6, 'C': 0xF7}
 
 def capacity():
     return len(reclaimable()) + sum(n for _, n in BANKS)
@@ -46,7 +51,7 @@ def capacity():
 # 제어 코드 범위의 한자 글리프. 판독문이 <魔> 형태로 내보내므로 되받는다.
 CTRL_KANJI_REV = {'魔': 0x00, '士': 0x01, '見': 0x02, '入': 0x1F}
 
-_TAG = re.compile(r"<([0-9A-Fa-f]{2})>|<([ABCabc])([0-9A-Fa-f]{2})>|<([魔士見入])>|\\n")
+_TAG = re.compile(r"<([0-9A-Fa-f]{2})>|<([ABCDabcd])([0-9A-Fa-f]{2})>|<([魔士見入])>|\\n")
 
 def parse(text):
     """번역문 -> 토큰열. ('ch', 문자) 또는 ('raw', bytes)"""
@@ -142,8 +147,15 @@ def encode(text, codes, base_table):
     global _KREV, _REV
     if _KREV is None: _KREV = _kanji_rev()
     if _REV is None:
-        from dump import CTRL as DEC_CTRL, ambiguous
-        skip = set(DEC_CTRL) | ambiguous(base_table)
+        from dump import ambiguous
+        # 맨바이트로 내보내면 안 되는 코드.
+        #   0x00-0x1F : 0x00/0x01/0x02 는 결합 부호다. 렌더러($5D10)가 '다음'
+        #               바이트를 보고 앞 글자의 인덱스를 보정하므로, 한자 뒤에
+        #               맨 0x01 을 두면 앞 글자가 엉뚱한 글리프로 바뀐다.
+        #               원문이 士를 F4 01 로 쓰는 이유다. 0x03-0x1F 도 같은 위험.
+        #   0xE6-0xFF : 완성형 탁음 슬롯. 이 게임은 제어 코드로 재활용한다.
+        # dump.CTRL 은 0x01 을 discard 하므로 그대로 쓰면 안 된다.
+        skip = set(range(0x00, 0x20)) | set(range(0xE6, 0x100)) | ambiguous(base_table)
         _REV = {}
         for code, g in base_table.items():
             if code in skip: continue
@@ -165,7 +177,13 @@ def encode(text, codes, base_table):
                 out.append(rev[ch]); continue
             if v in _KREV:                      # 뱅크 한자 (판독문에서 옮겨온 것)
                 out += _KREV[v]; continue
-            raise KeyError(f"테이블에 없는 문자 {v!r}")
+            # 제어 범위에만 있는 글리프는 F4 이스케이프로 내보낸다 (★ ゾ ド 등)
+            for code, g in sorted(base_table.items()):
+                if g == v and code in CTRL:
+                    out.append(0xF4); out.append(code); break
+            else:
+                raise KeyError(f"테이블에 없는 문자 {v!r}")
+            continue
     return bytes(out)
 
 if __name__ == "__main__":

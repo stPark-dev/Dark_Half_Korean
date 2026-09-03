@@ -90,6 +90,16 @@ def report(tsv, worst=12):
         else:
             print(f"  여유 {st['capacity'] - est_V}자")
 
+    # 구간별 가드레일. Heaps 가 sublinear 이므로 초반에 더 많이 늘어나는 것이
+    # 정상이다. 아래를 넘으면 후반에 벽을 만난다.
+    prog = done_cap / max(1, done_cap + left_cap)
+    cap = st['capacity']
+    limit = int(cap * (0.52 + 0.48 * prog ** 1.6))
+    mark = "OK" if st['unique'] <= limit else "초과"
+    print(f"가드레일: 진행 {prog*100:.0f}% 시점 상한 {limit}자 / 현재 {st['unique']}자  [{mark}]")
+    if st['unique'] > limit:
+        print(f"  !! {st['unique']-limit}자 초과. 새 음절 도입을 억제하고 기존 음절로 바꿔 쓸 것.")
+
     # 음절 빈도 꼬리: 1~2회만 쓰인 음절은 인벤토리를 갉아먹는 주범
     tail = sorted(c for c in freq if freq[c] <= 2)
     print(f"출현 1~2회 음절 {len(tail)}자 (이 음절들을 기존 음절로 바꾸면 여유가 생긴다)")

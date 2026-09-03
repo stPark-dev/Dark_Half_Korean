@@ -27,7 +27,11 @@ def load_tbl(path):
         if len(k) == 2 and v: t[int(k, 16)] = v
     return t
 
-BANK_CH = {0xF5: 'A', 0xF6: 'B', 0xF7: 'C'}
+# 이스케이프 프리픽스 $F4~$F7. 렌더러($5CFA)는 AND #$03 으로 하위 2비트만
+# 글리프 인덱스 상위 바이트에 넣는다. 즉 F4 xx = 인덱스 xx (0~255) 로,
+# 맨바이트로는 쓸 수 없는 제어 범위 인덱스(0x00-0x1F, 0xE0-0xFF)에 닿는 경로다.
+# 원문도 그렇게 쓴다: F4 00=魔 F4 01=士 F4 02=見 F4 FF=★ (맨바이트면 결합부호/종료자)
+BANK_CH = {0xF4: 'D', 0xF5: 'A', 0xF6: 'B', 0xF7: 'C'}
 
 # 제어 코드 범위에 있는데 실제로는 한자 글리프인 코드. 단어 안에 쓰이므로
 # 판독 시 글자를 보여줘야 읽히고, 번역에서는 버려도 된다(제어 기능이 없다).
@@ -71,10 +75,15 @@ def decode(b, t, kanji=None, amb=None):
             else: out.append('<01>')
             i += 1
         elif x in BANK_CH and i+1 < len(b):
-            if kanji is not None and (x, b[i+1]) in kanji:
-                out.append(kanji[(x, b[i+1])])
+            idx = b[i+1]
+            if x == 0xF4:
+                # 인덱스 0~255 = 단일바이트 글리프표와 같은 자리
+                if kanji is not None and idx in t: out.append(t[idx])
+                else: out.append(f"<D{idx:02X}>")
+            elif kanji is not None and (x, idx) in kanji:
+                out.append(kanji[(x, idx)])
             else:
-                out.append(f"<{BANK_CH[x]}{b[i+1]:02X}>")
+                out.append(f"<{BANK_CH[x]}{idx:02X}>")
             i += 2
         elif x in CTRL:
             # 태그로 남기되, 한자 글리프인 4개는 글자를 보여준다 (<魔> 형태).
