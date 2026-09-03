@@ -7,7 +7,7 @@
 usage:
   trcheck.py <script.tsv> [--worst N]
 """
-import sys, os, collections
+import sys, os, re, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dump import load_tbl
 import krcodec
@@ -48,6 +48,34 @@ def report(tsv, worst=12):
           f" {st['occ1']/(st['occ1']+st['occ2'])*100:.0f}% 담당"
           f" -> 평균 {st['avg_bytes']:.2f} 바이트/음절")
 
+    # 일본어 잔존 검사.
+    # 뱅크 한자와 가나는 인코딩이 정상 통과하므로 예산·인코딩 검사에 걸리지
+    # 않는다. 한국어 문장 중간에 일본어가 박혀 나오는 것을 눈으로만 잡아야
+    # 했는데(실제로 #472 의 守り 를 놓쳤다), 여기서 자동으로 잡는다.
+    #
+    # 어려운 점: 제어 바이트가 글리프로 렌더돼 판독문에 일본어처럼 보인다
+    # (出 ミ 者 手 生 등). 그건 보존해야 하는 바이트라 누락이 아니다.
+    # 구분 규칙: 제어 바이트는 <XX> 태그 바로 뒤에 붙고, 진짜 누락은
+    # 한글에 붙어 있다. 그래서 '태그 직후가 아니고 한글에 인접한' 일본어만
+    # 잡는다.
+    JP_RUN = re.compile(r'[ぁ-んァ-ヶ一-鿿]+')
+    HANGUL = re.compile(r'[가-힣]')
+    leftover = []
+    for i, cap, t in done:
+        for m in JP_RUN.finditer(t):
+            before = t[m.start()-1] if m.start() else ''
+            after = t[m.end()] if m.end() < len(t) else ''
+            if before == '>':            # 제어 바이트 (태그 직후)
+                continue
+            if not (HANGUL.match(before or ' ') or HANGUL.match(after or ' ')):
+                continue                 # 한글에 인접하지 않으면 제어 골격으로 본다
+            lo, hi = max(0, m.start()-12), min(len(t), m.end()+12)
+            leftover.append((i, m.group(), t[lo:hi]))
+    if leftover:
+        print(f"\n!! 일본어가 남은 것으로 보이는 곳 {len(leftover)}건")
+        for i, ch, ctx in leftover[:worst]:
+            print(f"   #{i}: {ch}   …{ctx}…")
+
     over, bad = [], []
     used = 0
     for i, cap, t in done:
@@ -65,12 +93,12 @@ def report(tsv, worst=12):
         print(f"\n!! 예산 초과 세그먼트 {len(over)}개 / {len(done)}개")
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
-    if not over and not bad:
-        print(f"\n예산 검사 통과 — 초과 0개, 인코딩 불가 0개")
+    if not over and not bad and not leftover:
+        print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
-    import math, re
+    import math
     KANA = re.compile(r'[ぁ-んァ-ヶ]')
     tot_syl = sum(freq.values())
     done_cap = sum(cap for _, cap, _ in done)
@@ -104,7 +132,7 @@ def report(tsv, worst=12):
     tail = sorted(c for c in freq if freq[c] <= 2)
     print(f"출현 1~2회 음절 {len(tail)}자 (이 음절들을 기존 음절로 바꾸면 여유가 생긴다)")
     if tail: print("  " + "".join(tail[:80]))
-    return 1 if (over or bad) else 0
+    return 1 if (over or bad or leftover) else 0
 
 if __name__ == "__main__":
     a = sys.argv[1:]
