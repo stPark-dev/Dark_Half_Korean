@@ -76,6 +76,27 @@ def report(tsv, worst=12):
         for i, ch, ctx in leftover[:worst]:
             print(f"   #{i}: {ch}   …{ctx}…")
 
+    # 고아 프리픽스 검사.
+    # 원문의 <F4><魔> 같은 이스케이프는 두 태그가 한 글리프를 이룬다.
+    # 悪<F4><魔> 를 '악마' 로 옮길 때 <魔> 만 지우고 <F4> 를 남기면,
+    # 인코더는 0xF4 를 그냥 내보내고 예산·인코딩 검사도 통과한다.
+    # 그런데 렌더러는 0xF4 를 프리픽스로 보고 다음 바이트를 글리프
+    # 인덱스로 먹으므로, 뒤 글자가 엉뚱한 글리프로 바뀌고 한 글자가 사라진다.
+    # 바이트 역검증(verify_insert)도 인코더 출력과 ROM 을 비교할 뿐이라
+    # 이 오류를 잡지 못한다. 실기에서만 드러나므로 여기서 막는다.
+    # 태그 뒤에 태그가 오는 <F4><魔> 형태는 정상이므로 제외한다.
+    ORPHAN = re.compile(r'<(F4|F5|F6|F7|5D|D5)>(?!<)', re.I)
+    orphan = []
+    for i, cap, t in done:
+        for m in ORPHAN.finditer(t):
+            lo, hi = max(0, m.start()-10), min(len(t), m.end()+10)
+            orphan.append((i, m.group(), t[lo:hi]))
+    if orphan:
+        print(f"\n!! 고아 프리픽스 {len(orphan)}건"
+              f" (다음 글자를 글리프 인덱스로 먹는다)")
+        for i, ch, ctx in orphan[:worst]:
+            print(f"   #{i}: {ch}   …{ctx}…")
+
     over, bad = [], []
     used = 0
     for i, cap, t in done:
@@ -93,8 +114,8 @@ def report(tsv, worst=12):
         print(f"\n!! 예산 초과 세그먼트 {len(over)}개 / {len(done)}개")
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
-    if not over and not bad and not leftover:
-        print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0")
+    if not over and not bad and not leftover and not orphan:
+        print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0, 고아 프리픽스 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
@@ -132,7 +153,7 @@ def report(tsv, worst=12):
     tail = sorted(c for c in freq if freq[c] <= 2)
     print(f"출현 1~2회 음절 {len(tail)}자 (이 음절들을 기존 음절로 바꾸면 여유가 생긴다)")
     if tail: print("  " + "".join(tail[:80]))
-    return 1 if (over or bad or leftover) else 0
+    return 1 if (over or bad or leftover or orphan) else 0
 
 if __name__ == "__main__":
     a = sys.argv[1:]
