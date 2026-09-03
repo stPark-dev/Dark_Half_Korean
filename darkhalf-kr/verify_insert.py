@@ -45,8 +45,17 @@ def main(orig_p, new_p, tsv):
             if bad <= 5: print(f"  #{c[0]} 불일치\n    기대 {want.hex()}\n    실제 {got.hex()}")
     print(f"[1] 번역 세그먼트 바이트 일치 {ok}/{ok+bad}"); fail += bad
 
+    # 이름표 문자열이 대사 뱅크 안에 있어 추출기가 대사 세그먼트로 잡는다
+    # (마법 이름 0x04f3d3 = 세그먼트 #1295). 그 자리는 이름표가 정본이므로
+    # '미번역 세그먼트 원본 보존' 검사에서 뺀다.
+    import nametbl
+    NAME_OWN = [(sp["data"], sp["limit"]) for sp, _ in nametbl.TABLES]
+    def name_owned(a, n):
+        return any(a < hi and a + n > lo for lo, hi in NAME_OWN)
+
     diff = sum(1 for c in rows
                if not (c[8] if len(c) > 8 else "").strip()
+               and not name_owned(int(c[2],16), int(c[3]))
                and new[int(c[2],16):int(c[2],16)+int(c[3])]
                 != orig[int(c[2],16):int(c[2],16)+int(c[3])])
     print(f"[2] 미번역 세그먼트 원본 보존: 차이 {diff}개"); fail += diff
@@ -74,11 +83,19 @@ def main(orig_p, new_p, tsv):
     druns = find_runs(orig)
     DESC_R = [(druns[i][0] + PREFIX, druns[i][0] + druns[i][1]) for i in DESC]
 
+    # 이름표(마법 등) 구간. 포인터 표와 문자열.
+    import nametbl, patch_names
+    NAME_R = []
+    for spec, _ in nametbl.TABLES:
+        NAME_R.append((spec["ptr"], spec["ptr"] + 2*spec["count"]))
+        NAME_R.append((spec["data"], spec["limit"]))
+
     out = [i for i in range(len(orig)) if orig[i] != new[i]
            and not (TEXT[0] <= i < TEXT[1]) and not (FONT[0] <= i < FONT[1])
            and not (WORD_PTR[0] <= i < WORD_PTR[1])
            and not (WORD_STR[0] <= i < WORD_STR[1])
            and not any(a <= i < b for a, b in DESC_R)
+           and not any(a <= i < b for a, b in NAME_R)
            and not (0xFFDC <= i <= 0xFFDF)]
     print(f"[5] 허용 영역 밖 변경 {len(out)}바이트"); fail += len(out)
 
@@ -87,6 +104,11 @@ def main(orig_p, new_p, tsv):
     print(f"[6] 단어표 포인터 왕복: 불일치 {len(wbad)}개"
           + (f" {[(hex(k), kr) for k, kr, _, _ in wbad[:4]]}" if wbad else ""))
     fail += len(wbad)
+
+    nbad = patch_names.verify(new, codes, tbl)
+    print(f"[7] 이름표 포인터 왕복: 불일치 {len(nbad)}개"
+          + (f" {[(nm, hex(k), kr) for nm, k, kr, _, _ in nbad[:4]]}" if nbad else ""))
+    fail += len(nbad)
 
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0

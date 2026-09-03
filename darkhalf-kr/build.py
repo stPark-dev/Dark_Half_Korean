@@ -25,7 +25,7 @@ pipeline 은 회수 (143자). 두 배정이 같은 폰트 영역을 쓰므로 �
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import krcodec, tralloc, words, patch_words, pipeline
+import krcodec, tralloc, words, patch_words, nametbl, patch_names, pipeline
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -63,7 +63,8 @@ def main(src, tsv, dst, engine=False):
     dlg = [(int(c[3]), c[8]) for c in rows if len(c) > 8 and c[8].strip()]
 
     pairs = dlg + [(cap, txt) for _, cap, txt in desc_items]
-    codes, freq, st = tralloc.allocate(pairs, t, extra=words.texts())
+    codes, freq, st = tralloc.allocate(pairs, t,
+                                       extra=words.texts() + nametbl.texts())
     print(f"배정: 고유 음절 {st['unique']}/{st['capacity']}자 | "
           f"단일바이트 {st['single_slots']}자가 출현의"
           f" {st['occ1']/(st['occ1']+st['occ2'])*100:.0f}% | "
@@ -81,9 +82,8 @@ def main(src, tsv, dst, engine=False):
         rom = patch_engine.patch(rom, verbose=False)
         print(f"엔진 패치 적용 (롬 {len(rom)}바이트)")
 
-    # --- 2) 폰트와 단어표 ---
+    # --- 2) 폰트 ---
     pipeline.patch_font(rom, codes)
-    patch_words.apply(rom, codes, t, verbose=True)
 
     # --- 3) 각 구간 삽입. 전부 제자리(원본 길이)라 포인터를 건드리지 않는다 ---
     over = []
@@ -109,10 +109,20 @@ def main(src, tsv, dst, engine=False):
             print(f"   {tag} {a:#08x}: {n}/{cap}바이트 (초과 {n-cap})  {x[:40]}")
         sys.exit(1)
 
+    # --- 4) 단어표·이름표는 대사 뒤에 쓴다 ---
+    # 이름표 문자열이 대사 뱅크(0x040C00~0x050000) 안에 있어서, 추출기가
+    # 그것까지 대사 세그먼트로 잡는다. 마법 이름 문자열 0x04f3d3 은
+    # 세그먼트 #1295 다. 그 세그먼트는 미번역이므로 위에서 원본 바이트를
+    # 되쓴다. 이름표를 먼저 쓰면 그 되쓰기에 덮인다.
+    # 실제로 처음에는 이 순서 때문에 [7] 이 17건 전부 불일치였다.
+    patch_words.apply(rom, codes, t, verbose=True)
+    patch_names.apply(rom, codes, t, verbose=True)
+
     pipeline.fix_checksum(rom)
     open(dst, 'wb').write(rom)
     print(f"대사 {len(dlg)}개 + 설명문 {len(desc_items)}개"
-          f" + 단어표 {words.COUNT}개 -> {dst} ({len(rom)}바이트)")
+          f" + 단어표 {words.COUNT}개 + 이름표 {len(nametbl.TABLES)}종"
+          f" -> {dst} ({len(rom)}바이트)")
 
     import json
     json.dump({ch: sl.hex() for ch, sl in codes.items()},
