@@ -13,7 +13,7 @@ from makefont import encode as enc_glyph
 from dump import load_tbl
 
 PREFIX = 9
-FB, BANKS = 0x2F0000, {0xF5: 0x2F4000, 0xF6: 0x2F8000, 0xF7: 0x2FC000}
+from pipeline import FONT_BASE      # 폰트 주소 계산은 pipeline 한 곳에만 둔다
 
 KO = {
  0: "적을 화염으로 감싼다",
@@ -74,7 +74,7 @@ def main(src, dst):
         for i, n, c, x in over: print(f"   #{i:2d} {n:3d}/{c:3d}바이트 (초과 {n-c:2d})  {x}")
         sys.exit(1)
     for ch, slot in codes.items():
-        a = FB + slot[0]*64 if len(slot) == 1 else BANKS[slot[0]] + slot[1]*64
+        a = FONT_BASE[None] + slot[0]*64 if len(slot) == 1 else FONT_BASE[slot[0]] + slot[1]*64
         rom[a:a+64] = enc_glyph(ch)
     rom[0xFFDC]=rom[0xFFDD]=0xFF; rom[0xFFDE]=rom[0xFFDF]=0x00
     c=(sum(rom[:0x200000])+2*sum(rom[0x200000:0x300000]))&0xFFFF; comp=c^0xFFFF

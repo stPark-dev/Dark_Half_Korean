@@ -15,9 +15,9 @@ import sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import krcodec, makefont
 from dump import load_tbl
+from pipeline import FONT_BASE      # 폰트 주소 계산은 pipeline 한 곳에만 둔다
 
 TBL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl")
-FONT_BASE = {None: 0x2F0000, 0xF5: 0x2F4000, 0xF6: 0x2F8000, 0xF7: 0x2FC000}
 TEXT = (0x040C00, 0x050000)
 FONT = (0x2F0000, 0x300000)
 

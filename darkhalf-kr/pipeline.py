@@ -92,7 +92,7 @@ def cmd_insert(rom_path, tsv, out):
     pairs = [(int(c[3]), x) for c, x in zip(rows, trs) if x.strip()]
     codes, freq, st = tralloc.allocate(pairs, t) if pairs else ({}, {}, None)
     if st:
-        print(f"번역 세그먼트 {len(todo)}개 | 고유 음절 {st['unique']}/{st['capacity']}자")
+        print(f"번역 세그먼트 {len(pairs)}개 | 고유 음절 {st['unique']}/{st['capacity']}자")
         print(f"  단일바이트 배정 {st['single_slots']}자가 출현의 "
               f"{st['occ1']/(st['occ1']+st['occ2'])*100:.0f}% 담당 -> 평균 {st['avg_bytes']:.2f} 바이트/음절")
         patch_font(rom, codes)
