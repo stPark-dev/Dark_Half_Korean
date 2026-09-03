@@ -24,29 +24,38 @@ def main(rom_path):
     check("F7 뱅크 96슬롯 (0x00-0x3D + 0xDE-0xFF)", banks.get(0xF7) == 96, f"{banks.get(0xF7)}")
 
     check("F4 뱅크 58슬롯 (0x00-0x1F + 0xE6-0xFF)", banks.get(0xF4) == 58, f"{banks.get(0xF4)}")
+    check("신규 프리픽스 $5D 256슬롯", banks.get(0x5D) == 256, f"{banks.get(0x5D)}")
+    check("신규 프리픽스 $D5 256슬롯", banks.get(0xD5) == 256, f"{banks.get(0xD5)}")
+    check("프리픽스 바이트는 단일바이트 배정 제외",
+          not (set(krcodec.reclaimable()) & krcodec.PREFIX_BYTES))
 
     print("[2] 수용량")
     os.environ.pop("DH_KEEP_KANA", None)
-    check("단일바이트 회수 145개", len(krcodec.reclaimable()) == 145, f"{len(krcodec.reclaimable())}")
-    check("전면 번역 수용량 811자", krcodec.capacity() == 811, f"{krcodec.capacity()}")
+    check("단일바이트 회수 143개 (프리픽스 $5D/$D5 제외)", len(krcodec.reclaimable()) == 143, f"{len(krcodec.reclaimable())}")
+    check("전면 번역 수용량 1321자", krcodec.capacity() == 1321, f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"
-    check("가나 보존 시 단일바이트 34개", len(krcodec.reclaimable()) == 34, f"{len(krcodec.reclaimable())}")
+    check("가나 보존 시 단일바이트 33개", len(krcodec.reclaimable()) == 33, f"{len(krcodec.reclaimable())}")
     os.environ.pop("DH_KEEP_KANA", None)
 
     print("[3] 글리프 기록 주소 — 뱅크별로 올바른 폰트 영역에 써야 한다")
     BASE = {1: 0x2F0000, 0xF5: 0x2F4000, 0xF6: 0x2F8000, 0xF7: 0x2FC000}
+    ROM4MB = 4 * 1024 * 1024
     for slot, want in ((bytes([0x22]), 0x2F0000 + 0x22*64),
                        (bytes([0xF5, 0x10]), 0x2F4000 + 0x10*64),
                        (bytes([0xF6, 0x10]), 0x2F8000 + 0x10*64),
-                       (bytes([0xF7, 0x10]), 0x2FC000 + 0x10*64)):
-        buf = bytearray(rom)
+                       (bytes([0xF7, 0x10]), 0x2FC000 + 0x10*64),
+                       (bytes([0x5D, 0x10]), 0x300000 + 0x10*64),
+                       (bytes([0xD5, 0x10]), 0x304000 + 0x10*64)):
+        # 신규 프리픽스는 4MB 확장분(0x300000~)을 쓰므로 버퍼를 늘려서 검사한다
+        base = bytearray(rom) + bytearray(b'\xff') * (ROM4MB - len(rom))
+        buf = bytearray(base)
         pipeline.patch_font(buf, {"가": slot})
-        got = [a for a in range(0x2F0000, 0x300000, 64) if buf[a:a+64] != rom[a:a+64]]
+        got = [a for a in range(0x2F0000, 0x308000, 64) if buf[a:a+64] != base[a:a+64]]
         tag = f"슬롯 {slot.hex()}"
         check(f"{tag} -> {want:#08x}", got == [want], f"실제 {[hex(x) for x in got]}")
 
     print("[4] F7 상위 슬롯은 절대 배정되지 않아야 한다 (폰트 아닌 데이터 영역)")
-    codes, _, _ = krcodec.allocate(["".join(chr(0xAC00+i) for i in range(753))], tbl)
+    codes, _, _ = krcodec.allocate(["".join(chr(0xAC00+i) for i in range(1321))], tbl)
     bad = [ch for ch, s in codes.items()
            if len(s) == 2 and s[0] == 0xF7 and 0x3E <= s[1] < 0xDE]
     check("F7 0x3E-0xDD (정체불명 구간) 미배정", not bad, f"{len(bad)}개 배정됨")
@@ -60,6 +69,8 @@ def main(rom_path):
     check("뱅크 태그 <A05> -> F5 05", krcodec.encode("<A05>", codes, tbl) == b'\xf5\x05')
     check("뱅크 태그 <C05> -> F7 05", krcodec.encode("<C05>", codes, tbl) == b'\xf7\x05')
     check("뱅크 태그 <D02> -> F4 02", krcodec.encode("<D02>", codes, tbl) == b'\xf4\x02')
+    check("뱅크 태그 <E05> -> 5D 05", krcodec.encode("<E05>", codes, tbl) == b'\x5d\x05')
+    check("뱅크 태그 <F05> -> D5 05", krcodec.encode("<F05>", codes, tbl) == b'\xd5\x05')
     check("F4 02 는 見 로 읽힌다", decode(b'\xf4\x02', tbl, {}) == '見')
     check("★ 은 F4 로 인코딩", krcodec.encode("★", codes, tbl)[:1] == b'\xf4')
 
@@ -138,6 +149,7 @@ def test_readable_safe(rom_path):
     check("모호 글리프 전부 태그", not bad, f"{[hex(c) for c in bad]}")
     rt = 0
     for c in range(0x20, 0xE0):
+        if c in krcodec.PREFIX_BYTES: continue   # 프리픽스는 맨바이트로 못 쓴다
         txt = decode(bytes([c]), tbl, {})
         try:
             if krcodec.encode(txt, {}, tbl) != bytes([c]): rt += 1

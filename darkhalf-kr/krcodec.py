@@ -16,6 +16,10 @@ KEEP = {0x20, 0x21, 0x28, 0x29, 0x2E, 0x3F} | set(range(0x30, 0x3A)) \
 # 제어 코드 영역 (건드리지 않음)
 CTRL = set(range(0x00, 0x20)) | set(range(0xE0, 0x100))
 
+# 이스케이프 프리픽스로 쓰는 바이트. 단일바이트 글리프로 배정하면
+# 렌더러가 프리픽스로 해석해 다음 바이트까지 먹는다.
+PREFIX_BYTES = {0xF4, 0xF5, 0xF6, 0xF7, 0x5D, 0xD5}
+
 # 가나 글리프 (보존하면 미번역 텍스트와 메뉴가 정상 표시됨)
 KANA = set(range(0x66, 0x70)) | set(range(0x71, 0x9E)) | set(range(0xA6, 0xDE))
 
@@ -23,7 +27,7 @@ def reclaimable():
     """한글에 배정할 수 있는 단일바이트 코드.
     DH_KEEP_KANA=1 이면 가나를 보존하고 한자/기호 슬롯만 회수한다."""
     import os
-    skip = KEEP | CTRL | (KANA if os.environ.get("DH_KEEP_KANA") == "1" else set())
+    skip = KEEP | CTRL | PREFIX_BYTES | (KANA if os.environ.get("DH_KEEP_KANA") == "1" else set())
     return sorted(c for c in range(0x20, 0xE0) if c not in skip)
 
 # 2바이트 이스케이프 뱅크.
@@ -36,14 +40,24 @@ def reclaimable():
 #   0x20-0xDF 는 단일바이트로 이미 쓰므로 F4 로 중복 배정하지 않는다.
 #   0xE0-0xE5 는 화살표(←→)와 ★ 로 UI 에 쓰이므로 보존한다.
 F4_SLOTS = list(range(0x00, 0x20)) + list(range(0xE6, 0x100))
+
+# 엔진 패치로 추가한 프리픽스. 실기 검증 완료 (image/002.png).
+# 렌더러의 이스케이프 판별($950F, $5CFA)을 확장해 $5D -> 인덱스 상위 4,
+# $D5 -> 상위 5 로 넣고, DMA 뱅크를 $EF + ($6A>>2) 로 계산하게 했다.
+# 인덱스 1024~1535 는 뱅크 $F0 = ROM 0x300000~0x307FC0 (4MB 확장분).
+# 자세한 근거는 PROGRESS.md 1.2.2 / patch_engine.py.
+PFX_NEW = {0x5D: 256, 0xD5: 256}
+
 BANK_SLOTS = {
     0xF4: F4_SLOTS,
     0xF5: list(range(0, 256)),
     0xF6: list(range(0, 256)),
     0xF7: list(range(0x00, 0x3E)) + list(range(0xDE, 0x100)),
+    0x5D: list(range(0, 256)),
+    0xD5: list(range(0, 256)),
 }
 BANKS = [(b, len(v)) for b, v in BANK_SLOTS.items()]
-BANK_TAG = {'D': 0xF4, 'A': 0xF5, 'B': 0xF6, 'C': 0xF7}
+BANK_TAG = {'D': 0xF4, 'A': 0xF5, 'B': 0xF6, 'C': 0xF7, 'E': 0x5D, 'F': 0xD5}
 
 def capacity():
     return len(reclaimable()) + sum(n for _, n in BANKS)
@@ -51,7 +65,7 @@ def capacity():
 # 제어 코드 범위의 한자 글리프. 판독문이 <魔> 형태로 내보내므로 되받는다.
 CTRL_KANJI_REV = {'魔': 0x00, '士': 0x01, '見': 0x02, '入': 0x1F}
 
-_TAG = re.compile(r"<([0-9A-Fa-f]{2})>|<([ABCDabcd])([0-9A-Fa-f]{2})>|<([魔士見入])>|\\n")
+_TAG = re.compile(r"<([0-9A-Fa-f]{2})>|<([A-Fa-f])([0-9A-Fa-f]{2})>|<([魔士見入])>|\\n")
 
 def parse(text):
     """번역문 -> 토큰열. ('ch', 문자) 또는 ('raw', bytes)"""
@@ -155,7 +169,8 @@ def encode(text, codes, base_table):
         #               원문이 士를 F4 01 로 쓰는 이유다. 0x03-0x1F 도 같은 위험.
         #   0xE6-0xFF : 완성형 탁음 슬롯. 이 게임은 제어 코드로 재활용한다.
         # dump.CTRL 은 0x01 을 discard 하므로 그대로 쓰면 안 된다.
-        skip = set(range(0x00, 0x20)) | set(range(0xE6, 0x100)) | ambiguous(base_table)
+        skip = (set(range(0x00, 0x20)) | set(range(0xE6, 0x100))
+                | PREFIX_BYTES | ambiguous(base_table))
         _REV = {}
         for code, g in base_table.items():
             if code in skip: continue

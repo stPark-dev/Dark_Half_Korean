@@ -26,10 +26,30 @@ PROBE_BYTES = bytes([0xFA, 0x01,          # 창 제어 (원본과 동일)
                      0xD5, 0x00,          # 프리픽스 5 + 인덱스 0 -> 1280
                      0x21])               # ！
 
-# 프로브를 심을 설명문 본문 (마법 -> 설명 에서 바로 보인다)
-#   PREFIX=9 바이트가 마법 이름, 그 뒤가 본문
-DESC_SPOTS = [(0x05b512, 26), (0x05b52d, 24), (0x05b546, 37)]
+# 프로브를 심을 설명문 본문. PREFIX=9 바이트가 마법 이름, 그 뒤가 본문.
+# #6 이 힐(ヒール) — 게임에서 맨 처음 얻는 마법이라 실기 확인이 가장 쉽다.
+# 앞쪽 것들도 함께 심어 다른 마법을 먼저 얻은 경우에도 잡히게 한다.
+DESC_SPOTS = [
+    (0x05b5cf, 38),   # #6 힐   ＨＰを回復する呪文 / アンデッドを消滅させる
+    (0x05b5f6, 45),   # #7 상태회복
+    (0x05b512, 26),   # #0 파이어
+    (0x05b52d, 24),   # #1 냉기
+    (0x05b546, 37),   # #2 광
+    (0x05b56c, 28),   # #3 풍
+    (0x05b589, 34),   # #4 소울
+    (0x05b5ac, 34),   # #5 사
+]
 DESC_PREFIX = 9
+
+# 프로브 본문. 부분 성공을 구분할 수 있게 두 프리픽스를 각각 여러 글자 쓴다.
+#   $5D + 00..03 -> 글리프 인덱스 1024~1027 (ROM 0x300000~)
+#   $D5 + 00..01 -> 글리프 인덱스 1280~1281 (ROM 0x304000~)
+PROBE_BODY = bytes([0x5D,0x00, 0x5D,0x01, 0x5D,0x02, 0x5D,0x03,
+                    0x20,
+                    0xD5,0x00, 0xD5,0x01,
+                    0x21])
+PROBE_GLYPHS_A = "한글성공"      # 인덱스 1024~1027
+PROBE_GLYPHS_B = "확장"          # 인덱스 1280~1281
 
 
 def main(src, dst, tsv):
@@ -46,9 +66,14 @@ def main(src, dst, tsv):
     rom = patch_engine.apply(src, dst, verbose=True)
 
     # 새 폰트 영역에 글리프 기록
-    rom[0x300000:0x300000+64] = makefont.encode('한')   # 인덱스 1024
-    rom[0x304000:0x304000+64] = makefont.encode('글')   # 인덱스 1280
-    print(f"  글리프: 인덱스 1024 <- '한' (0x300000), 인덱스 1280 <- '글' (0x304000)")
+    for i, ch in enumerate(PROBE_GLYPHS_A):
+        a = 0x300000 + i*64
+        rom[a:a+64] = makefont.encode(ch)
+    for i, ch in enumerate(PROBE_GLYPHS_B):
+        a = 0x304000 + i*64
+        rom[a:a+64] = makefont.encode(ch)
+    print(f"  글리프: 인덱스 1024~ <- '{PROBE_GLYPHS_A}' (0x300000), "
+          f"1280~ <- '{PROBE_GLYPHS_B}' (0x304000)")
 
     # 프로브 메시지 삽입 (남는 자리는 공백)
     rom[PROBE_ADDR:PROBE_ADDR+PROBE_LEN] = (
@@ -56,7 +81,7 @@ def main(src, dst, tsv):
     print(f"  프로브(아이템 창): {PROBE_ADDR:#08x} ({PROBE_LEN}바이트)")
 
     # 설명문 본문에도 심는다 — 마법 -> 설명 에서 바로 확인 가능
-    body = bytes([0x5D, 0x00, 0xD5, 0x00, 0x21])      # 한 글 ！
+    body = PROBE_BODY
     for ad, ln in DESC_SPOTS:
         cap = ln - DESC_PREFIX
         assert len(body) <= cap, f"{ad:#x} 예산 초과"
