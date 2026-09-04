@@ -84,6 +84,34 @@ def report(tsv, worst=12):
         for i, ch, ctx in leftover[:worst]:
             print(f"   #{i}: {ch}   …{ctx}…")
 
+    # 장음 부호 검사.
+    # 'ー'(0xB0) 는 가나 영역이라 회수 대상이고, 지금은 한글이 배정돼 있다.
+    # 그런데 일본어 잔존 검사의 문자 범위(ぁ-ん ァ-ヶ 一-鿿)가 U+30FC 를
+    # 포함하지 않아 그냥 통과했다. 실제로 내가 번역문에 「아ー」 를 써서
+    # 화면에 「아람」 이 나오는 상태를 만들었다.
+    #
+    # 다만 원문 제어 골격에도 0xB0 이 파라미터로 들어 있다 (<EE>ー<19>,
+    # <E9>輪ーＹ). 그것은 그려지지 않으므로 보존해야 한다.
+    # 구분: 태그 직후('>')가 아니고, 한글이나 문장부호에 붙어 있으면 텍스트다.
+    LONG = re.compile(r'[・-ヿ゙-ゟ]')
+    PUNCT = '！？。‥」　'
+    longbad = []
+    for i, cap, t in done:
+        for m in LONG.finditer(t):
+            before = t[m.start()-1] if m.start() else ''
+            after = t[m.end()] if m.end() < len(t) else ''
+            if before == '>': continue                     # 제어 파라미터
+            if not (HANGUL.match(before or ' ') or HANGUL.match(after or ' ')
+                    or before in PUNCT or after in PUNCT):
+                continue                                   # 제어 골격으로 본다
+            lo, hi = max(0, m.start()-12), min(len(t), m.end()+12)
+            longbad.append((i, m.group(), t[lo:hi]))
+    if longbad:
+        print(f"\n!! 장음 부호가 텍스트에 남았다 {len(longbad)}건"
+              f" (0xB0 은 한글이 배정돼 있다)")
+        for i, ch, ctx in longbad[:worst]:
+            print(f"   #{i}: {ch!r}   …{ctx}…")
+
     # 단어표 뒤 조사 일치 검사.
     # <EB>xx 는 런타임에 단어를 끼워 넣으므로, 삽입되는 단어의 종성에 따라
     # 뒤 조사의 형태가 갈린다. 단어표를 해독하기 전에는 알 수 없어서
@@ -138,9 +166,9 @@ def report(tsv, worst=12):
         print(f"\n!! 예산 초과 세그먼트 {len(over)}개 / {len(done)}개")
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
-    if not over and not bad and not leftover and not orphan and not jbad:
+    if not over and not bad and not leftover and not orphan and not jbad and not longbad:
         print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0,"
-              f" 고아 프리픽스 0, 조사 불일치 0")
+              f" 고아 프리픽스 0, 조사 불일치 0, 장음 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
@@ -178,7 +206,7 @@ def report(tsv, worst=12):
     tail = sorted(c for c in freq if freq[c] <= 2)
     print(f"출현 1~2회 음절 {len(tail)}자 (이 음절들을 기존 음절로 바꾸면 여유가 생긴다)")
     if tail: print("  " + "".join(tail[:80]))
-    return 1 if (over or bad or leftover or orphan or jbad) else 0
+    return 1 if (over or bad or leftover or orphan or jbad or longbad) else 0
 
 if __name__ == "__main__":
     a = sys.argv[1:]

@@ -53,13 +53,20 @@ F4_SLOTS = list(range(0x00, 0x20)) + list(range(0xE6, 0x100))
 # 자세한 근거는 PROGRESS.md 1.2.2 / patch_engine.py.
 PFX_NEW = {0x5D: 256, 0xD5: 256}
 
+# 이스케이프의 둘째 바이트로 0xFF 를 쓰면 안 된다.
+# 0xFF 는 문자열·메시지 종료자다. 단어표와 이름표는 0xFF 로 엔트리를 끊으므로
+# 「컨」 이 F6 FF 를 받으면 판독이 첫 바이트에서 끊긴다.
+# 실제로 마법 이름 [0x0B] 이 이 때문에 삽입 역검증 [7] 에서 걸렸다.
+# 슬롯 6개(뱅크별 1개)를 잃는다. 수용량 1320 -> 1314.
+_NO_FF = lambda xs: [i for i in xs if i != 0xFF]
+
 BANK_SLOTS = {
-    0xF4: F4_SLOTS,
-    0xF5: list(range(0, 256)),
-    0xF6: list(range(0, 256)),
-    0xF7: list(range(0x00, 0x3E)) + list(range(0xDE, 0x100)),
-    0x5D: list(range(0, 256)),
-    0xD5: list(range(0, 256)),
+    0xF4: _NO_FF(F4_SLOTS),
+    0xF5: _NO_FF(range(0, 256)),
+    0xF6: _NO_FF(range(0, 256)),
+    0xF7: _NO_FF(list(range(0x00, 0x3E)) + list(range(0xDE, 0x100))),
+    0x5D: _NO_FF(range(0, 256)),
+    0xD5: _NO_FF(range(0, 256)),
 }
 BANKS = [(b, len(v)) for b, v in BANK_SLOTS.items()]
 BANK_TAG = {'D': 0xF4, 'A': 0xF5, 'B': 0xF6, 'C': 0xF7, 'E': 0x5D, 'F': 0xD5}

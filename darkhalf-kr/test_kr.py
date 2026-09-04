@@ -19,13 +19,13 @@ def main(rom_path):
 
     print("[1] 뱅크 정의 — F7 은 0x3E 이후가 폰트 데이터가 아니다")
     banks = dict(krcodec.BANKS)
-    check("F5 뱅크 256슬롯", banks.get(0xF5) == 256, f"{banks.get(0xF5)}")
-    check("F6 뱅크 256슬롯", banks.get(0xF6) == 256, f"{banks.get(0xF6)}")
-    check("F7 뱅크 96슬롯 (0x00-0x3D + 0xDE-0xFF)", banks.get(0xF7) == 96, f"{banks.get(0xF7)}")
+    check("F5 뱅크 255슬롯 (0xFF 제외)", banks.get(0xF5) == 255, f"{banks.get(0xF5)}")
+    check("F6 뱅크 255슬롯 (0xFF 제외)", banks.get(0xF6) == 255, f"{banks.get(0xF6)}")
+    check("F7 뱅크 95슬롯 (0x00-0x3D + 0xDE-0xFE)", banks.get(0xF7) == 95, f"{banks.get(0xF7)}")
 
-    check("F4 뱅크 58슬롯 (0x00-0x1F + 0xE6-0xFF)", banks.get(0xF4) == 58, f"{banks.get(0xF4)}")
-    check("신규 프리픽스 $5D 256슬롯", banks.get(0x5D) == 256, f"{banks.get(0x5D)}")
-    check("신규 프리픽스 $D5 256슬롯", banks.get(0xD5) == 256, f"{banks.get(0xD5)}")
+    check("F4 뱅크 57슬롯 (0x00-0x1F + 0xE6-0xFE)", banks.get(0xF4) == 57, f"{banks.get(0xF4)}")
+    check("신규 프리픽스 $5D 255슬롯 (0xFF 제외)", banks.get(0x5D) == 255, f"{banks.get(0x5D)}")
+    check("신규 프리픽스 $D5 255슬롯 (0xFF 제외)", banks.get(0xD5) == 255, f"{banks.get(0xD5)}")
     check("프리픽스 바이트는 단일바이트 배정 제외",
           not (set(krcodec.reclaimable()) & krcodec.PREFIX_BYTES))
 
@@ -35,7 +35,7 @@ def main(rom_path):
     # 143 이었다가 0xA0(♥) 을 KEEP 으로 옮겨 하나 줄었다. ♥ 는 본문 문장부호가
     # 아니라 UI 표시 글리프여서 회수하면 아이템 창이 깨진다 (krcodec.KEEP 주석).
     check("단일바이트 회수 142개 (프리픽스 $5D/$D5, ♥ 제외)", len(krcodec.reclaimable()) == 142, f"{len(krcodec.reclaimable())}")
-    check("전면 번역 수용량 1320자", krcodec.capacity() == 1320, f"{krcodec.capacity()}")
+    check("전면 번역 수용량 1314자", krcodec.capacity() == 1314, f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"
     check("가나 보존 시 단일바이트 32개", len(krcodec.reclaimable()) == 32, f"{len(krcodec.reclaimable())}")
     os.environ.pop("DH_KEEP_KANA", None)
@@ -56,6 +56,18 @@ def main(rom_path):
         got = [a for a in range(0x2F0000, 0x308000, 64) if buf[a:a+64] != base[a:a+64]]
         tag = f"슬롯 {slot.hex()}"
         check(f"{tag} -> {want:#08x}", got == [want], f"실제 {[hex(x) for x in got]}")
+
+    print("[3b] 이스케이프 둘째 바이트에 0xFF 가 오면 안 된다")
+    # 0xFF 는 문자열·메시지 종료자다. 단어표·이름표는 0xFF 로 엔트리를 끊으므로
+    # 「컨」 이 F6 FF 를 받으면 판독이 첫 바이트에서 끊긴다. 실제로 마법 이름
+    # [0x0B] 이 이 때문에 삽입 역검증 [7] 에서 걸렸다.
+    for b, idxs in krcodec.BANK_SLOTS.items():
+        check(f"뱅크 {b:#04x} 슬롯에 0xFF 없음", 0xFF not in idxs,
+              "0xFF 가 슬롯에 있다")
+    codes_ff, _, _ = krcodec.allocate(
+        ["".join(chr(0xAC00+i) for i in range(krcodec.capacity()))], tbl)
+    ff = [ch for ch, sl in codes_ff.items() if len(sl) == 2 and sl[1] == 0xFF]
+    check("수용량을 꽉 채워도 0xFF 로 끝나는 배정 없음", not ff, f"{ff[:5]}")
 
     print("[4] F7 상위 슬롯은 절대 배정되지 않아야 한다 (폰트 아닌 데이터 영역)")
     # 수용량을 꽉 채워야 F7 상위 구간까지 배정 시도가 간다. 상수로 박지 않는다.
