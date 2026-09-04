@@ -49,16 +49,16 @@ def load_tsv(tsv):
     return rows
 
 
-def main(src, tsv, dst, engine=False):
-    rom = bytearray(open(src, 'rb').read())
-    orig = bytes(rom)          # 칸 계산은 원본 배치로만 해야 한다
-    t = load_tbl(TBL)
-    rows = load_tsv(tsv)
-    segs = pipeline.segments(bytes(rom))[0]
-    assert len(rows) == len(segs), f"행 수 불일치 {len(rows)} != {len(segs)}"
+def plan(orig, rows, t):
+    """음절 배정을 한 번에 결정한다. build 와 trcheck 가 같이 쓴다.
 
-    # --- 1) 모든 한국어를 모아 한 번만 배정 ---
-    runs = find_runs(bytes(rom))
+    두 곳이 각자 배정하면 예산 초과 예측이 실제 빌드와 어긋난다. 실제로
+    trcheck 가 689자, build 가 703자로 갈려 trcheck 만 초과를 보고했다.
+    그래서 입력 구성과 force 반복을 여기 한 곳에 둔다.
+
+    반환: (codes, freq, st, force, desc_items, dlg)
+    """
+    runs = find_runs(orig)
     desc_items = [(runs[i][0] + PREFIX, runs[i][1] - PREFIX, txt)
                   for i, txt in DESC.items()]
     dlg = [(int(c[3]), c[8]) for c in rows if len(c) > 8 and c[8].strip()]
@@ -68,10 +68,11 @@ def main(src, tsv, dst, engine=False):
     # 넘겨 우선 배정 대상에 들어가게 한다.
     pairs = (dlg + [(cap, txt) for _, cap, txt in desc_items]
              + words.pairs(orig) + nametbl.pairs(orig))
+
     # 표 항목이 원본 칸에 안 들어가면, 그 항목의 음절만 절대 우선으로 돌려
     # 다시 배정한다. 실패가 없어질 때까지 반복하므로 필요한 최소만 강제한다.
-    # 표 전체 음절은 129자인데 단일바이트 칸이 143 뿐이라, 전부 강제하면
-    # 대사 쪽에 남는 칸이 14개가 되어 예산이 무너진다.
+    # 표 전체 음절은 129자인데 단일바이트 칸이 142 뿐이라, 전부 강제하면
+    # 대사 쪽에 남는 칸이 13개가 되어 예산이 무너진다.
     force = set()
     for _ in range(8):
         codes, freq, st = tralloc.allocate(pairs, t, force=force)
@@ -82,6 +83,19 @@ def main(src, tsv, dst, engine=False):
         for kr in miss:
             for kind, v in krcodec.parse(kr):
                 if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+    return codes, freq, st, force, desc_items, dlg
+
+
+def main(src, tsv, dst, engine=False):
+    rom = bytearray(open(src, 'rb').read())
+    orig = bytes(rom)          # 칸 계산은 원본 배치로만 해야 한다
+    t = load_tbl(TBL)
+    rows = load_tsv(tsv)
+    segs = pipeline.segments(bytes(rom))[0]
+    assert len(rows) == len(segs), f"행 수 불일치 {len(rows)} != {len(segs)}"
+
+    # --- 1) 모든 한국어를 모아 한 번만 배정 ---
+    codes, freq, st, force, desc_items, dlg = plan(orig, rows, t)
     if force:
         print(f"표 칸을 맞추려 절대 우선으로 돌린 음절 {len(force)}자: "
               f"{''.join(sorted(force))}")

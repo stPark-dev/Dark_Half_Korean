@@ -31,10 +31,13 @@ def main(rom_path):
 
     print("[2] 수용량")
     os.environ.pop("DH_KEEP_KANA", None)
-    check("단일바이트 회수 143개 (프리픽스 $5D/$D5 제외)", len(krcodec.reclaimable()) == 143, f"{len(krcodec.reclaimable())}")
-    check("전면 번역 수용량 1321자", krcodec.capacity() == 1321, f"{krcodec.capacity()}")
+    # 142 = 0x20~0xDF 에서 KEEP·제어·프리픽스를 뺀 수.
+    # 143 이었다가 0xA0(♥) 을 KEEP 으로 옮겨 하나 줄었다. ♥ 는 본문 문장부호가
+    # 아니라 UI 표시 글리프여서 회수하면 아이템 창이 깨진다 (krcodec.KEEP 주석).
+    check("단일바이트 회수 142개 (프리픽스 $5D/$D5, ♥ 제외)", len(krcodec.reclaimable()) == 142, f"{len(krcodec.reclaimable())}")
+    check("전면 번역 수용량 1320자", krcodec.capacity() == 1320, f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"
-    check("가나 보존 시 단일바이트 33개", len(krcodec.reclaimable()) == 33, f"{len(krcodec.reclaimable())}")
+    check("가나 보존 시 단일바이트 32개", len(krcodec.reclaimable()) == 32, f"{len(krcodec.reclaimable())}")
     os.environ.pop("DH_KEEP_KANA", None)
 
     print("[3] 글리프 기록 주소 — 뱅크별로 올바른 폰트 영역에 써야 한다")
@@ -55,7 +58,9 @@ def main(rom_path):
         check(f"{tag} -> {want:#08x}", got == [want], f"실제 {[hex(x) for x in got]}")
 
     print("[4] F7 상위 슬롯은 절대 배정되지 않아야 한다 (폰트 아닌 데이터 영역)")
-    codes, _, _ = krcodec.allocate(["".join(chr(0xAC00+i) for i in range(1321))], tbl)
+    # 수용량을 꽉 채워야 F7 상위 구간까지 배정 시도가 간다. 상수로 박지 않는다.
+    codes, _, _ = krcodec.allocate(
+        ["".join(chr(0xAC00+i) for i in range(krcodec.capacity()))], tbl)
     bad = [ch for ch, s in codes.items()
            if len(s) == 2 and s[0] == 0xF7 and 0x3E <= s[1] < 0xDE]
     check("F7 0x3E-0xDD (정체불명 구간) 미배정", not bad, f"{len(bad)}개 배정됨")
@@ -84,12 +89,16 @@ def main(rom_path):
                          capture_output=True, text=True).stdout
     check("왕복 0바이트", "차이 0바이트" in out, out.strip().splitlines()[-1] if out else "")
 
-    print("[8] 기존 UI 패치 회귀")
+    print("[8] 통합 빌드 회귀 — 대사·설명문·단어표·이름표를 한 배정으로")
+    # patch_all.py 는 은퇴했다. 자체 배정(DH_KEEP_KANA=1)으로 폰트를 따로 덮고
+    # MENU 13개가 대사 세그먼트를 잘라 먹기 때문이다. build.py 가 정본이다.
     with tempfile.TemporaryDirectory() as d:
         o = os.path.join(d, "t.sfc")
-        r = subprocess.run([sys.executable, "darkhalf-kr/patch_all.py", rom_path, o],
+        r = subprocess.run([sys.executable, "darkhalf-kr/build.py",
+                            rom_path, "darkhalf-kr/script_main.tsv", o],
                            capture_output=True, text=True)
-        check("patch_all 정상 종료", r.returncode == 0 and os.path.exists(o), r.stderr[-200:])
+        check("build 정상 종료", r.returncode == 0 and os.path.exists(o),
+              (r.stdout + r.stderr)[-300:])
 
     test_readable_safe(rom_path)
     test_readable_roundtrip(rom_path)

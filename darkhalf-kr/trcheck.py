@@ -8,6 +8,9 @@ usage:
   trcheck.py <script.tsv> [--worst N]
 """
 import sys, os, re, collections
+
+# 표 칸 크기는 원본 배치로만 계산할 수 있다
+ROM_FOR_SLOTS = "Dark Half (Japan).sfc"
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from dump import load_tbl
 import krcodec
@@ -34,11 +37,12 @@ def report(tsv, worst=12):
     import tralloc
     texts = [t for _, _, t in done]
     try:
-        # 단어표(<EB>xx)의 한국어도 인벤토리에 들어간다. pipeline 과 같은 입력을
-        # 써야 예산 초과 예측이 실제 삽입과 일치한다.
-        import words
-        codes, freq, st = tralloc.allocate([(cap, t) for _, cap, t in done], tbl,
-                                           extra=words.texts())
+        # 배정은 build.plan 한 곳에서만 한다. 여기서 따로 배정하면 예측이
+        # 실제 빌드와 갈린다 (실제로 trcheck 689자 / build 703자로 갈려
+        # trcheck 만 초과를 보고했다).
+        import build
+        orig = open(ROM_FOR_SLOTS, 'rb').read()
+        codes, freq, st, _force, _desc, _dlg = build.plan(orig, rows, tbl)
     except SystemExit as e:
         print(f"\n!! 배정 불가: {e}")
         uniq = {v for t in texts for k, v in krcodec.parse(t)
