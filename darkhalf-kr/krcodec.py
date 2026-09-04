@@ -10,9 +10,14 @@
 import re, os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# 보존: 공백, ！, （）, 숫자, ？, A-Z, 。「」、‥
+# 보존: 공백, ！, （）, 숫자, ？, A-Z, ♥, 。「」、‥
+#
+# 0xA0(♥) 은 본문 문장부호가 아니라 UI 가 쓰는 표시 글리프다. 마법·아이템
+# 목록의 커서 표시이고, 레코드 표 0x04f139 에도 각 레코드의 셋째 바이트로
+# 박혀 있다. 회수했다가 「보」 가 배정되어 아이템 창에 「보힐」 로 나왔다
+# (image/problem_005.png). ★ 과 화살표(0xE0-0xE5)를 보존하는 것과 같은 이유다.
 KEEP = {0x20, 0x21, 0x28, 0x29, 0x2E, 0x3F} | set(range(0x30, 0x3A)) \
-     | set(range(0x41, 0x5B)) | {0xA1, 0xA2, 0xA3, 0xA4, 0xA5}
+     | set(range(0x41, 0x5B)) | {0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5}
 # 제어 코드 영역 (건드리지 않음)
 CTRL = set(range(0x00, 0x20)) | set(range(0xE0, 0x100))
 
