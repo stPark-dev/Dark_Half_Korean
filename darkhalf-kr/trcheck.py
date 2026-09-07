@@ -128,6 +128,30 @@ def report(tsv, worst=12):
         for sid, w, alt, ctx in jman[:worst]:
             print(f"   #{sid}: {w}   …{ctx}…")
 
+    # 한글 속 이스케이프 검사.
+    # 원문 <F4><見>る 를 「보다」 로 옮길 때 <F4><見> 를 지우지 않으면
+    # 「見다」 처럼 한국어 단어 안에 일본어 한자가 박힌다. 태그가 둘 다
+    # 붙어 있어 고아 프리픽스 검사는 통과하고, 인코딩·예산도 통과한다.
+    # 실제로 배치 65 시점에 30건이 쌓여 있었다 (발見했습니다, 성기士,
+    # 병士여, <見>았느냐 등). 여러 배치에 걸쳐 누적된 것이다.
+    #
+    # 정당한 경우가 없다. 원문 제어 골격은 한글에 인접하지 않고,
+    # 일본어를 일부러 남긴 자리도 한글에 붙지 않는다.
+    EMBED = re.compile(r'<F[4-7]><[魔士見入]>|<F[4-7]><[0-9A-Fa-f]{2}>')
+    embed = []
+    for i, cap, t in done:
+        for m in EMBED.finditer(t):
+            before = t[m.start()-1] if m.start() else ''
+            after = t[m.end()] if m.end() < len(t) else ''
+            if not (HANGUL.match(before or ' ') or HANGUL.match(after or ' ')):
+                continue
+            lo, hi = max(0, m.start()-12), min(len(t), m.end()+10)
+            embed.append((i, m.group(), t[lo:hi]))
+    if embed:
+        print(f"\n!! 한글 속에 일본어 이스케이프가 남았다 {len(embed)}건")
+        for i, g, ctx in embed[:worst]:
+            print(f"   #{i}: {g}   …{ctx}…")
+
     # 고아 프리픽스 검사.
     # 원문의 <F4><魔> 같은 이스케이프는 두 태그가 한 글리프를 이룬다.
     # 悪<F4><魔> 를 '악마' 로 옮길 때 <魔> 만 지우고 <F4> 를 남기면,
@@ -180,9 +204,9 @@ def report(tsv, worst=12):
         print(f"\n!! 예산 초과 세그먼트 {len(over)}개 / {len(done)}개")
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
-    if not over and not bad and not leftover and not orphan and not jbad and not longbad:
+    if not over and not bad and not leftover and not orphan and not jbad and not longbad and not embed:
         print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0,"
-              f" 고아 프리픽스 0, 조사 불일치 0, 장음 0")
+              f" 고아 프리픽스 0, 조사 불일치 0, 장음 0, 한글속한자 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
@@ -220,7 +244,7 @@ def report(tsv, worst=12):
     tail = sorted(c for c in freq if freq[c] <= 2)
     print(f"출현 1~2회 음절 {len(tail)}자 (이 음절들을 기존 음절로 바꾸면 여유가 생긴다)")
     if tail: print("  " + "".join(tail[:80]))
-    return 1 if (over or bad or leftover or orphan or jbad or longbad) else 0
+    return 1 if (over or bad or leftover or orphan or jbad or longbad or embed) else 0
 
 if __name__ == "__main__":
     a = sys.argv[1:]
