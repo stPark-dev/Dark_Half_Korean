@@ -137,10 +137,24 @@ def report(tsv, worst=12):
     # 바이트 역검증(verify_insert)도 인코더 출력과 ROM 을 비교할 뿐이라
     # 이 오류를 잡지 못한다. 실기에서만 드러나므로 여기서 막는다.
     # 태그 뒤에 태그가 오는 <F4><魔> 형태는 정상이므로 제외한다.
+    # 예외: 세그먼트 맨 끝의 프리픽스는 정상일 수 있다.
+    # 추출기의 0xFF 스캔이 이스케이프를 모르기 때문에, 원문에 「Fx FF」 형태의
+    # 글리프 참조가 있으면 그 FF 를 메시지 종료자로 오인해 거기서 쪼갠다.
+    # 그래서 원문 자체가 프리픽스로 끝나는 세그먼트가 17개 있다 (#364 #802 ...).
+    # 그 자리에서 프리픽스를 지우면 뒤 FF 가 진짜 종료자가 되어 이어지는
+    # 내용이 잘린다. 실제로 #364 에서 <F5> 를 지워 뒷부분을 잘라먹었다.
+    # 원문이 같은 프리픽스로 끝나면 번역문 말미의 프리픽스를 허용한다.
+    orig_last = {}
+    for c in rows:
+        if len(c) > 5 and c[5]:
+            orig_last[int(c[0])] = int(c[5][-2:], 16)
+
     ORPHAN = re.compile(r'<(F4|F5|F6|F7|5D|D5)>(?!<)', re.I)
     orphan = []
     for i, cap, t in done:
         for m in ORPHAN.finditer(t):
+            if m.end() == len(t) and orig_last.get(i) == int(m.group(1), 16):
+                continue                      # 원문 구조 보존
             lo, hi = max(0, m.start()-10), min(len(t), m.end()+10)
             orphan.append((i, m.group(), t[lo:hi]))
     if orphan:
