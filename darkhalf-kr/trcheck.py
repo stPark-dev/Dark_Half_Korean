@@ -252,7 +252,9 @@ def report(tsv, worst=12):
     # 이스케이프는 2칸으로 갈라진다. 원문의 탁점 결합 부호(c4 01 = ど)는
     # 2바이트 1칸인데, 그것과 달리 F5~F7 이스케이프는 1칸으로 묶이지 않는다.
     # 그래서 선택 필드는 단일바이트만 쓰고, 칸 수를 원문과 맞춘다.
-    CHOICE = re.compile(r'<ED>出(.*?)<ED> ')
+    # 종료 표지는 <ED>공백 만이 아니다. 아이템 명령 메뉴(#48)는 <ED>界 로
+    # 끝난다. 그래서 <ED>공백 만 보던 처음 판은 아이템 메뉴를 통째로 놓쳤다.
+    CHOICE = re.compile(r'<ED>出(.*?)<ED>')
     one = {c for c, v in codes.items() if len(v) == 1}
     orig_txt2 = {int(c[0]): c[7] for c in rows if len(c) > 7}
 

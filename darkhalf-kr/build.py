@@ -118,7 +118,21 @@ def plan(orig, rows, t):
         for kind, v in krcodec.parse(txt):
             if kind == "ch" and krcodec.is_hangul(v): no_risky.add(v)
 
+    # 선택·명령 필드(<ED>出 … <ED>)의 음절은 반드시 단일바이트여야 한다.
+    #
+    # 이 필드는 바이트 하나를 타일 하나로 그린다. 이스케이프를 넣으면 두
+    # 글리프로 갈라져 깨진다 (PROGRESS 4.15.3~4.16). 아이템 메뉴의
+    # 「사용」「설명」, 전투 메뉴의 「마법 사용」이 그렇게 깨졌다.
+    #
+    # 칸 수도 원문과 맞춰야 한다. 단일바이트만 쓰면 칸 = 바이트이므로,
+    # 원문 바이트 수를 맞추면 칸 수도 맞는다.
+    import re as _re
+    FIELD = _re.compile(r'<ED>出(.*?)<ED>')
     force = {"호"}
+    for _, txt in dlg_addr:
+        for f in FIELD.findall(txt):
+            for kind, v in krcodec.parse(f):
+                if kind == "ch" and krcodec.is_hangul(v): force.add(v)
     for _ in range(8):
         codes, freq, st = tralloc.allocate(pairs, t, force=force, no_risky=no_risky)
         probe = bytearray(orig)
