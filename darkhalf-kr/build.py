@@ -73,13 +73,21 @@ def plan(orig, rows, t):
     # 다시 배정한다. 실패가 없어질 때까지 반복하므로 필요한 최소만 강제한다.
     # 표 전체 음절은 129자인데 단일바이트 칸이 142 뿐이라, 전부 강제하면
     # 대사 쪽에 남는 칸이 13개가 되어 예산이 무너진다.
+    #
+    # 엔딩은 이 반복에 넣지 않는다. 넣었더니 대사 예산 초과가 2개에서 72개로
+    # 뛰었다. 엔딩 조각이 1바이트 넘치면 그 조각 음절 열 개가 전부 강제 배정을
+    # 받는데, 1바이트를 아끼려 단일바이트 칸 열 개를 쓰는 거래다. 밀려난
+    # 고빈도 음절은 대사 1000개에 걸쳐 비용을 낸다.
+    #
+    # 단어표·이름표는 칸이 고정이라(腕輪 는 2바이트) 강제가 유일한 수단이지만,
+    # 엔딩 조각은 8~17바이트이고 가운데맞춤 공백까지 있어 고쳐 쓸 여지가 넓다.
+    # 그래서 엔딩 초과는 endbatch check 로 드러내고 사람이 문장을 고친다.
     force = set()
     for _ in range(8):
         codes, freq, st = tralloc.allocate(pairs, t, force=force)
         probe = bytearray(orig)
         miss = ([kr for _, kr, _, _ in patch_words.apply(probe, codes, t)]
-                + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)]
-                + [kr for _, kr, _, _ in patch_ending.apply(probe, codes, t)])
+                + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)])
         if not miss: break
         for kr in miss:
             for kind, v in krcodec.parse(kr):

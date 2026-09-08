@@ -64,12 +64,20 @@ def main(rom_path, out_tsv):
     print(f"포인터 표: {[hex(p) for p in pointers(rom)]}")
     ls = lines(rom)
     prose = [(o, b, c) for o, b, c in ls if len(KANA.findall(decode(b, t, KANJI))) >= 1]
+    # 이미 있는 번역은 보존한다. 한자를 새로 식별해 재추출하는 일이 반복되는데,
+    # 그때마다 번역이 날아가면 안 된다 (한 번 날려 먹었다).
+    keep = {}
+    if os.path.exists(out_tsv):
+        for l in open(out_tsv, encoding='utf-8'):
+            r = l.rstrip('\n').split('\t')
+            if len(r) >= 7 and r[6].strip() and not r[0].startswith('#'): keep[r[0]] = r[6]
+        if keep: print(f"기존 번역 {len(keep)}개 보존")
     with open(out_tsv, 'w', encoding='utf-8') as f:
         f.write("#id\toff\tlen\tend\thex\treadable\ttranslation\n")
         for i, (o, b, c) in enumerate(ls):
             f.write(f"{i}\t{o:#06x}\t{len(b)}\t"
                     f"{'%02X' % c if c is not None else ''}\t{b.hex()}\t"
-                    f"{decode(b, t, KANJI)}\t\n")
+                    f"{decode(b, t, KANJI)}\t{keep.get(str(i), '')}\n")
     tot = sum(len(b) for _, b, _ in prose)
     ln = sorted(len(b) for _, b, _ in prose)
     print(f"조각 {len(ls)}개 -> {out_tsv}")

@@ -80,9 +80,31 @@ def cmd_check():
     return 1 if over else 0
 
 
+def cmd_cost(*args):
+    """조각별 예산과 음절 비용을 보여준다. 2바이트 음절을 1바이트로 바꿔
+    쓰는 게 엔딩 다듬기의 전부라, 이게 없으면 짐작으로 고치게 된다."""
+    import build
+    from dump import load_tbl as _lt
+    rom = open("Dark Half (Japan).sfc", 'rb').read()
+    tbl = _lt(TBL)
+    mrows = build.load_tsv("darkhalf-kr/script_main.tsv")
+    codes, _, _, _, _, _ = build.plan(rom, mrows, tbl)
+    rs = rows(); idx = {r[0]: r for r in rs[1:] if r}
+    ids = args if args else [r[0] for r in rs[1:] if len(r) >= 7 and r[6].strip()]
+    for sid in ids:
+        r = idx[sid]; kr = r[6]; cap = int(r[2])
+        n = len(krcodec.encode(kr, codes, tbl))
+        mark = "  " if n <= cap else "!!"
+        pricey = "".join(sorted({c for c in kr if krcodec.is_hangul(c)
+                                 and len(krcodec.encode(c, codes, tbl)) > 1}))
+        print(f"{mark} #{sid:>4} {n:>3}/{cap:<3} {kr}")
+        if pricey: print(f"        2바이트: {pricey}")
+
+
 if __name__ == "__main__":
     c = sys.argv[1]
     if   c == "show":  cmd_show(int(sys.argv[2]), int(sys.argv[3]))
     elif c == "set":   cmd_set(sys.argv[2])
     elif c == "stat":  cmd_stat()
     elif c == "check": sys.exit(cmd_check())
+    elif c == "cost":  cmd_cost(*sys.argv[2:])
