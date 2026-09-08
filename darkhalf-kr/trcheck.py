@@ -8,6 +8,7 @@ usage:
   trcheck.py <script.tsv> [--worst N]
 """
 import sys, os, re, collections
+from collections import Counter
 
 # 표 칸 크기는 원본 배치로만 계산할 수 있다
 ROM_FOR_SLOTS = "Dark Half (Japan).sfc"
@@ -211,6 +212,31 @@ def report(tsv, worst=12):
         for i, ch, ctx in orphan[:worst]:
             print(f"   #{i}: {ch}   …{ctx}…")
 
+    # [9] 제어 코드 보존 — 메뉴 정지를 낸 결함이 이 부류였다.
+    #
+    # #1095 「<EB><15>の頂<EE>に←」 를 예산에 맞추려 「<EB><15>의 정상←」 으로
+    # 줄이면서 <EE> 를 지웠다. 이동 목록(메뉴)에서 게임이 멈췄다. 다른 네
+    # 항목에는 <EE> 를 남겼는데 이것만 빠졌다.
+    #
+    # 바이트 역검증([1])은 이걸 못 잡는다. 길이만 맞으면 통과하기 때문이다.
+    # 고아 프리픽스 검사도 못 잡는다. 그건 F4~F7·5D·D5 만 본다.
+    #
+    # F4~F7 은 글리프 프리픽스라 한자를 한국어로 바꾸면 같이 사라지는 게
+    # 맞으므로 제외한다. <EB> 는 단어표 참조라 넣고 빼는 게 번역 선택이므로
+    # 제외한다. 나머지 E5~FE 는 개수가 보존돼야 한다.
+    CTL = re.compile(r'<(E[5-9ACDEF]|F[0-3]|F[89ABCDE])>')
+    orig_txt = {int(c[0]): c[7] for c in rows if len(c) > 7}
+    ctlbad = []
+    for i, cap, t in done:
+        a = Counter(CTL.findall(orig_txt.get(i, "")))
+        b = Counter(CTL.findall(t))
+        lost, gain = a - b, b - a
+        if lost or gain: ctlbad.append((i, dict(lost), dict(gain), t))
+    if ctlbad:
+        print(f"\n!! 제어 코드 불일치 {len(ctlbad)}건 (지우면 렌더러가 멈출 수 있다)")
+        for i, lo, gi, t in ctlbad[:worst]:
+            print(f"   #{i}: 잃음={lo} 얻음={gi}  {t[:44]}")
+
     over, bad = [], []
     used = 0
     for i, cap, t in done:
@@ -228,9 +254,11 @@ def report(tsv, worst=12):
         print(f"\n!! 예산 초과 세그먼트 {len(over)}개 / {len(done)}개")
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
-    if not over and not bad and not leftover and not orphan and not jbad and not longbad and not embed and not invade:
+    if not (over or bad or leftover or orphan or jbad or longbad or embed
+            or invade or ctlbad):
         print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0,"
-              f" 고아 프리픽스 0, 조사 불일치 0, 장음 0, 한글속한자 0, 표침범 0")
+              f" 고아 프리픽스 0, 조사 불일치 0, 장음 0, 한글속한자 0, 표침범 0,"
+              f" 제어 코드 불일치 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
