@@ -123,6 +123,26 @@ def main(orig_p, new_p, tsv):
           + (f" {[(nm, hex(k), kr) for nm, k, kr, _, _ in nbad[:4]]}" if nbad else ""))
     fail += len(nbad)
 
+    # [9] 메뉴·표 영역에 F4 이스케이프가 없어야 한다 (PROGRESS 4.12).
+    #
+    # F4 의 두 번째 바이트는 항상 제어 코드 값이다. F4 를 처리하지 않는 메뉴·표
+    # 렌더러가 그 바이트를 제어 코드로 읽으면 게임이 멈춘다. #1222 「진형」이
+    # f4 1f 로 들어가 메뉴에서 멈췄고, 이분 탐색으로 롬 다섯 개를 만들어 찾았다.
+    #
+    # 배정기가 no_f4 로 막지만, 막혔는지는 삽입된 바이트로 확인해야 한다.
+    f4bad = []
+    for c in rows:
+        tr = (c[8] if len(c) > 8 else "").strip()
+        if not tr: continue
+        a = int(c[2], 16)
+        if a < 0x04e000: continue
+        b = new[a:a + int(c[3])]
+        hit = [hex(b[i+1]) for i in range(len(b)-1) if b[i] == 0xF4]
+        if hit: f4bad.append((c[0], tr[:16], hit))
+    print(f"[9] 메뉴·표 영역 F4 이스케이프: {len(f4bad)}건"
+          + (f" {f4bad[:4]}" if f4bad else ""))
+    fail += len(f4bad)
+
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0
 
