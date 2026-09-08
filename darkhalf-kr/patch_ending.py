@@ -34,7 +34,11 @@ def load(tsv=None):
         if line.startswith('#'): continue
         c = line.rstrip('\n').split('\t')
         if len(c) < 7: continue
-        out.append((c[0], int(c[1], 16), int(c[2]), c[5], c[6]))
+        off = int(c[1], 16)
+        # 0x366 이후는 엔딩이 아니다 (ending.TEXT_END 주석 참조). 번역문이
+        # 실려 있어도 무시한다 — 미식별 데이터에 쓰는 사고를 원천 차단한다.
+        if off >= ending.TEXT_END: continue
+        out.append((c[0], off, int(c[2]), c[5], c[6]))
     return out
 
 
