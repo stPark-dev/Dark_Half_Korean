@@ -23,3 +23,6 @@ darkhalf-kr/wram_write*.txt
 
 # 삽입 시 나오는 빌드 산물 (음절->코드 배정표)
 *.sfc.codes.json
+
+# 엔딩 추출 산물 (ending.py 로 재생성 가능)
+script_ending.tsv
