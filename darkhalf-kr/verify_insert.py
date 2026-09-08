@@ -60,8 +60,16 @@ def main(orig_p, new_p, tsv):
                 != orig[int(c[2],16):int(c[2],16)+int(c[3])])
     print(f"[2] 미번역 세그먼트 원본 보존: 차이 {diff}개"); fail += diff
 
+    # 엔딩 텍스트는 폰트 영역 안(0x2FCFC0~0x2FF780)에 있다. 그 자리는 글리프가
+    # 아니므로 폰트 슬롯 검사에서 제외한다 (PROGRESS 4.8).
+    import patch_ending
+    ewr = patch_ending.written_range()
+    def in_ending(a):
+        return any(lo <= a < hi or lo < a+64 <= hi for lo, hi in ewr)
+
     want_addr = {slot_addr(s) for s in codes.values()}
-    changed = {a for a in range(*FONT, 64) if new[a:a+64] != orig[a:a+64]}
+    changed = {a for a in range(*FONT, 64)
+               if new[a:a+64] != orig[a:a+64] and not in_ending(a)}
     same = changed == want_addr
     print(f"[3] 폰트 변경 슬롯 {len(changed)}개 / 배정 {len(want_addr)}개  일치={same}")
     if not same:
@@ -104,6 +112,11 @@ def main(orig_p, new_p, tsv):
     print(f"[6] 단어표 제자리·포인터 무변경: 불일치 {len(wbad)}개"
           + (f" {[(hex(k), kr) for _, k, kr, _, _ in wbad[:4]]}" if wbad else ""))
     fail += len(wbad)
+
+    ebad = patch_ending.verify(new, orig, codes, tbl)
+    print(f"[8] 엔딩 제자리·포인터 무변경: 불일치 {len(ebad)}개"
+          + (f" {[(sid, kr[:14]) for sid, kr, _, _ in ebad[:3]]}" if ebad else ""))
+    fail += len(ebad)
 
     nbad = patch_names.verify(new, orig, codes, tbl)
     print(f"[7] 이름표 제자리·포인터 무변경: 불일치 {len(nbad)}개"

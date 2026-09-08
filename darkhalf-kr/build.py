@@ -25,7 +25,7 @@ pipeline 은 회수 (143자). 두 배정이 같은 폰트 영역을 쓰므로 �
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import krcodec, tralloc, words, patch_words, nametbl, patch_names, pipeline
+import krcodec, tralloc, words, patch_words, nametbl, patch_names, patch_ending, pipeline
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -67,7 +67,7 @@ def plan(orig, rows, t):
     # 배정을 못 받아 2바이트 코드가 걸리고 칸을 넘긴다. 용량과 함께 pairs 로
     # 넘겨 우선 배정 대상에 들어가게 한다.
     pairs = (dlg + [(cap, txt) for _, cap, txt in desc_items]
-             + words.pairs(orig) + nametbl.pairs(orig))
+             + words.pairs(orig) + nametbl.pairs(orig) + patch_ending.pairs())
 
     # 표 항목이 원본 칸에 안 들어가면, 그 항목의 음절만 절대 우선으로 돌려
     # 다시 배정한다. 실패가 없어질 때까지 반복하므로 필요한 최소만 강제한다.
@@ -78,7 +78,8 @@ def plan(orig, rows, t):
         codes, freq, st = tralloc.allocate(pairs, t, force=force)
         probe = bytearray(orig)
         miss = ([kr for _, kr, _, _ in patch_words.apply(probe, codes, t)]
-                + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)])
+                + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)]
+                + [kr for _, kr, _, _ in patch_ending.apply(probe, codes, t)])
         if not miss: break
         for kr in miss:
             for kind, v in krcodec.parse(kr):
@@ -151,6 +152,12 @@ def main(src, tsv, dst, engine=False):
     # 실제로 처음에는 이 순서 때문에 [7] 이 17건 전부 불일치였다.
     wover = patch_words.apply(rom, codes, t, verbose=True)
     nover = patch_names.apply(rom, codes, t, verbose=True)
+    eover = patch_ending.apply(rom, codes, t, verbose=True)
+    if eover:
+        print(f"!! 엔딩 조각 초과 {len(eover)}개 (제자리라 늘릴 수 없다)")
+        for sid, kr, n, cap in eover[:12]:
+            print(f"   엔딩 #{sid} {kr[:30]!r}: {n}/{cap}바이트")
+        sys.exit(1)
     if wover or nover:
         print(f"!! 표 칸 초과 {len(wover)+len(nover)}개 (제자리라 늘릴 수 없다)")
         for k, kr, n, cap in wover:
