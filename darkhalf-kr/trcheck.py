@@ -245,19 +245,44 @@ def report(tsv, worst=12):
     #
     # 같은 창의 「괜찮습니까？」 는 이스케이프를 써도 정상이다. 창이 아니라
     # 필드가 다르다.
+    # 선택 필드는 **칸** 수가 고정이다. 원문보다 글자가 많으면 밀려서 잘리고
+    # (탐침에서 「ＹＥＳ」의 Ｙ가 왼쪽으로 잘려 나갔다), 적으면 남은 칸에
+    # 이전 타일이 남는다 (「네」 1칸을 3칸 필드에 넣어 2칸이 쓰레기가 됐다).
+    #
+    # 이스케이프는 2칸으로 갈라진다. 원문의 탁점 결합 부호(c4 01 = ど)는
+    # 2바이트 1칸인데, 그것과 달리 F5~F7 이스케이프는 1칸으로 묶이지 않는다.
+    # 그래서 선택 필드는 단일바이트만 쓰고, 칸 수를 원문과 맞춘다.
     CHOICE = re.compile(r'<ED>出(.*?)<ED> ')
     one = {c for c, v in codes.items() if len(v) == 1}
+    orig_txt2 = {int(c[0]): c[7] for c in rows if len(c) > 7}
+
+    def cells(field, single_only):
+        """필드의 칸 수. 이스케이프는 2칸으로 센다."""
+        n = 0
+        for kind, v in krcodec.parse(field):
+            if kind != "ch": continue          # 제어 코드는 칸을 차지하지 않는다
+            n += 1 if (not krcodec.is_hangul(v) or v in single_only) else 2
+        return n
+
     chbad = []
     for i, cap, t in done:
-        for m in CHOICE.finditer(t):
-            esc = [c for c in m.group(1)
-                   if krcodec.is_hangul(c) and c not in one]
-            if esc: chbad.append((i, m.group(1), "".join(esc)))
+        got = CHOICE.findall(t)
+        was = CHOICE.findall(orig_txt2.get(i, ""))
+        if len(got) != len(was):
+            chbad.append((i, f"필드 수 {len(was)} -> {len(got)}", "")); continue
+        for g, w in zip(got, was):
+            esc = [c for c in g if krcodec.is_hangul(c) and c not in one]
+            if esc:
+                chbad.append((i, g, f"이스케이프 {''.join(esc)}")); continue
+            # 원문 칸 수는 판독문 글자 수로 센다 (탁점 결합 부호는 한 칸)
+            wn = cells(w, one)
+            gn = cells(g, one)
+            if gn != wn:
+                chbad.append((i, g, f"칸 {wn} -> {gn}"))
     if chbad:
-        print(f"\n!! 선택 항목에 이스케이프 {len(chbad)}건"
-              f" (바이트 하나가 타일 하나다)")
+        print(f"\n!! 선택 항목 {len(chbad)}건 (칸 수 고정 필드다)")
         for i, f, e in chbad[:worst]:
-            print(f"   #{i}: |{f}|  이스케이프={e}")
+            print(f"   #{i}: |{f}|  {e}")
 
     over, bad = [], []
     used = 0
