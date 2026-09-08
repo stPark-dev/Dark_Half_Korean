@@ -56,8 +56,43 @@ def is_jp(c):
 
 RUN = re.compile(r'[ぁ-んァ-ヶ一-鿿]{4,}')   # 4자 이상 연속 = 산문
 
+def table_owned():
+    """이름표·단어표가 소유한 주소 구간.
+
+    표 문자열이 대사 뱅크 안에 있어서 추출기가 대사 세그먼트로도 잡는다
+    (마법 이름 0x04f3d3 = #1295 등 18개). 그 자리는 표가 정본이므로 대사로
+    번역하면 안 된다. 배치 79 에서 7개를 번역해 역검증이 깨졌다.
+    작업 목록에서 아예 빼 두어야 같은 실수가 반복되지 않는다.
+    """
+    import nametbl, words
+    r = [(sp["data"], sp["limit"]) for sp, _ in nametbl.TABLES]
+    r.append((words.DATA, words.DATA_LIMIT))
+    return r
+
+
+def has_inner_ptr(hexstr):
+    """엔트리 안에 절대 포인터(EE <ptr16>)가 박혀 있는가.
+
+    몬스터·아이템 이름은 접미사를 공유한다. 예를 들어 #1325 는 0xf68c 를
+    다섯 번 참조하는데, 그 접미사는 앞쪽 다른 세그먼트에 있다. 제자리로
+    번역하면 참조 대상은 그대로 일본어로 남아 섞여 나온다.
+    거꾸로 참조되는 쪽을 덮으면 그것을 쓰는 다른 이름이 함께 바뀐다.
+
+    조립기 없이는 손댈 수 없으므로 작업 목록에서 뺀다 (PROGRESS 4.6).
+    """
+    b = bytes.fromhex(hexstr)
+    for i in range(len(b) - 2):
+        if b[i] == 0xEE:
+            p = b[i+1] | (b[i+2] << 8)
+            if 0xF000 <= p <= 0xFFFF: return True
+    return False
+
+
 def todo(rows, prose_only=False):
-    t = [c for c in rows if is_jp(c) and not c[8].strip()]
+    owned = table_owned()
+    t = [c for c in rows if is_jp(c) and not c[8].strip()
+         and not any(lo <= int(c[2], 16) < hi for lo, hi in owned)
+         and not has_inner_ptr(c[5])]
     if prose_only: t = [c for c in t if RUN.search(c[7])]
     return t
 
