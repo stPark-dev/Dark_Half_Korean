@@ -154,3 +154,91 @@ if __name__ == "__main__":
     out = unpack(rom, a)
     print(f"{a:#08x} -> {len(out)}바이트")
     print(out[:64].hex())
+
+
+# ---------- 재인코딩 ----------
+
+def pack(buf):
+    """1024바이트 버퍼 -> (비트 스트림, 데이터 스트림).
+
+    ## 왜 단순 인코더로 충분한가
+
+    타일맵이 「타일 0x260 부터 연속으로 그려라」 형태라, 글리프 비트맵만 바꾸면
+    화면이 바뀐다. 타일맵도 텍스트도 건드릴 필요가 없다 (PROGRESS 4.17.7).
+    그래서 인코더는 정확하기만 하면 되고, 압축률을 짜낼 이유가 없다.
+
+    두 명령만 쓴다.
+
+        0,1  채움    8바이트가 전부 0x00 또는 0xFF 일 때 (폰트는 빈칸이 많다)
+        1,1  리터럴8 그 밖
+
+    복사·니블 역인터리브는 쓰지 않는다. 둘 다 원본 대비 크기를 줄여 주지만
+    인코더를 복잡하게 만들고, 잘못 쓰면 조용히 깨진다.
+    """
+    bits, data = [], bytearray()
+
+    def col_plan(col):
+        """8바이트 열 -> (명령 2비트, 쓸 비트들, 쓸 바이트들). 가장 싼 것을 고른다."""
+        from collections import Counter
+        c = Counter(col)
+        # 전부 같고 0x00/0xFF -> 채움 (0바이트)
+        if len(c) == 1 and col[0] in (0x00, 0xFF):
+            return (0, 1), [1 if col[0] == 0x00 else 0], b""
+        # 마스크 + 채움. 채움값을 비트로 줄 수 있으면(0x00/0xFF) 1바이트 아낀다
+        best = None
+        for f, n in c.items():
+            keep = [b for b in col if b != f]
+            m = 0
+            for b in col: m = (m << 1) | (0 if b == f else 1)
+            if f in (0x00, 0xFF):
+                cost = 1 + len(keep)
+                cand = ((1, 1), [1, 1, 1 if f == 0x00 else 0],
+                        bytes([m]) + bytes(keep), cost)
+            else:
+                cost = 2 + len(keep)
+                cand = ((1, 1), [1, 0], bytes([f, m]) + bytes(keep), cost)
+            if best is None or cost < best[3]: best = cand
+        # 니블 역인터리브. (a,b) 쌍을 L1,L2 로 되돌리는 것은 항상 가능하다.
+        #   L1 = (a & 0xF0) | (b >> 4)      L2 = ((b & 0x0F) << 4) | (a & 0x0F)
+        # 니블을 섞으면 0 이 더 많이 생겨서, 글리프 데이터에서는 바이트 단위
+        # 마스크보다 싸질 때가 있다.
+        for f in (0x00, 0xFF):
+            Ls = []
+            for k in range(0, 8, 2):
+                a, b = col[k], col[k+1]
+                Ls.append((a & 0xF0) | (b >> 4))
+                Ls.append(((b & 0x0F) << 4) | (a & 0x0F))
+            keep = [x for x in Ls if x != f]
+            m = 0
+            for x in Ls: m = (m << 1) | (0 if x == f else 1)
+            cost = 1 + len(keep)
+            if best is None or cost < best[3]:
+                best = ((0, 0), [1 if f == 0x00 else 0],
+                        bytes([m]) + bytes(keep), cost)
+        if best[3] < 8: return best[0], best[1], best[2]
+        return (1, 1), [0], bytes(col)                      # 리터럴 8개
+
+    base = 0
+    while base < BUFLEN:
+        cmdbits, chunk = [], bytearray()
+        for x in (base, base + 1, base + 0x10, base + 0x11):
+            cb, bb, by = col_plan([buf[x + k*2] for k in range(8)])
+            cmdbits += list(cb); bits += bb; chunk += by
+        cmd = 0
+        for b in cmdbits: cmd = (cmd << 1) | b
+        data.append(cmd & 0xFF); data += chunk
+        base += 0x20
+    bs = bytearray()
+    for i in range(0, len(bits), 8):
+        v = 0
+        for j in range(8):
+            v = (v << 1) | (bits[i+j] if i+j < len(bits) else 0)
+        bs.append(v)
+    return bytes(bs), bytes(data)
+
+
+def block(buf):
+    """pack() 결과를 롬에 쓸 한 덩어리로. 앞 1바이트가 비트 스트림 길이다."""
+    bs, data = pack(buf)
+    assert len(bs) <= 0xFF, f"비트 스트림 {len(bs)}바이트 > 255"
+    return bytes([len(bs)]) + bs + data
