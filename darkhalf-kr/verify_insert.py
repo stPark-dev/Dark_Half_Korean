@@ -136,20 +136,37 @@ def main(orig_p, new_p, tsv):
           + (f" {[(nm, hex(k), kr) for nm, k, kr, _, _ in nbad[:4]]}" if nbad else ""))
     fail += len(nbad)
 
-    # [9] 메뉴·표 영역에 F4 이스케이프가 없어야 한다 (PROGRESS 4.12).
+    # 설명문·단어표 항목 (주소, 칸, 한국어). 대사 세그먼트만 보면 부족하다.
+    import build as _b, words as _w
+    DESC_ITEMS = _b.plan(orig, rows, tbl)[4]
+    WORD_ITEMS = [(i, a, n, kr)
+                  for i, ((a, n), (_, kr)) in enumerate(zip(_w.slots(orig),
+                                                            _w.WORDS))
+                  if kr]
+
+    # [9] 메뉴·표 영역에 위험 이스케이프가 없어야 한다 (PROGRESS 4.12 / 4.15).
     #
     # F4 의 두 번째 바이트는 항상 제어 코드 값이다. F4 를 처리하지 않는 메뉴·표
     # 렌더러가 그 바이트를 제어 코드로 읽으면 게임이 멈춘다. #1222 「진형」이
     # f4 1f 로 들어가 메뉴에서 멈췄고, 이분 탐색으로 롬 다섯 개를 만들어 찾았다.
     #
     # 배정기가 no_f4 로 막지만, 막혔는지는 삽입된 바이트로 확인해야 한다.
+    # 검사 대상은 배정 제약과 같은 기준이어야 한다 (build.plan 의 is_story).
+    # 처음엔 0x04e000 이상만 봤는데, 시스템 메시지는 대사 뱅크 앞쪽에 몰려
+    # 있고 설명문은 아예 빠져 있었다. 그래서 힐 설명문의 f6 03 / f5 1c 를
+    # 못 잡았고, 힐을 선택하면 게임이 멈췄다.
+    def is_story(txt):
+        return "<FB>" in txt or "<F2>" in txt or txt.lstrip().startswith("「")
+
+    targets = [(int(c[2], 16), int(c[3]), c[0], (c[8] if len(c) > 8 else ""))
+               for c in rows
+               if (c[8] if len(c) > 8 else "").strip()
+               and not is_story(c[8])]
+    targets += [(a, cap, f"설명문{a:#x}", txt) for a, cap, txt in DESC_ITEMS]
+    targets += [(a, n, f"단어표[{i}]", kr) for i, a, n, kr in WORD_ITEMS]
+
     f4bad = []
-    for c in rows:
-        tr = (c[8] if len(c) > 8 else "").strip()
-        if not tr: continue
-        a = int(c[2], 16)
-        if a < 0x04e000: continue
-        n = int(c[3])
+    for a, n, sid, tr in targets:
         # 바이트를 단순 스캔하면 이스케이프의 '둘째' 바이트까지 잡는다
         # (F5 F4 를 F4 이스케이프로 오인). 렌더러와 같은 규칙으로 걷는다:
         # F4~F7·5D·D5 는 2바이트, 나머지는 1바이트.
@@ -171,7 +188,7 @@ def main(orig_p, new_p, tsv):
             return r
         got, was = risky(new[a:a+n]), risky(orig[a:a+n])
         if len(got) > len(was):
-            f4bad.append((c[0], tr[:16], got))
+            f4bad.append((sid, tr[:16], got))
     print(f"[9] 메뉴·표 영역 위험 이스케이프: {len(f4bad)}건"
           + (f" {f4bad[:4]}" if f4bad else ""))
     fail += len(f4bad)

@@ -94,18 +94,27 @@ def plan(orig, rows, t):
     # 5D·D5 는 엔진 패치가 추가한 것이라 대사·옵션·엔딩 렌더러만 안다.
     # krcodec.RISKY_PREFIX 주석 참조.
     #
-    # 경계를 0x04e000 으로 둔다. 정지를 실제로 낸 것은 0x04f000 이상의 표뿐이고
-    # (이분 탐색 E 롬), 그 아래 0x04e000 대에는 일반 대사도 섞여 있다. 그래도
-    # 넓게 막는 이유는 이동 목록이 거기 있기 때문이다 — E 롬은 이동 목록에 F4 가
-    # 있는 채로 메뉴가 열렸지만(#1087 은 f4 13 까지 있다), 이동 목록은 메뉴를
-    # 여는 것만으로는 그려지지 않는다. 그려질 때 멈출 수 있다.
+    # 무엇이 "메뉴·표에서 그려지는 글"인가.
     #
-    # 넓게 막아도 비용이 없다. F4 슬롯 57칸은 0x04e000 아래 대사 음절이 그대로
-    # 받으므로 5D/D5 로 넘치지 않는다 (확인: 단일 142 / F4 57 / F5 255 / F6 255
-    # / F7 95, 5D·D5 0).
-    menu_txt = [txt for cap, txt in dlg_addr if cap >= 0x04e000]
+    # 처음엔 주소로 갈랐다(0x04e000 이상). 틀렸다. 시스템 메시지는 대사 뱅크
+    # **앞쪽**에 몰려 있다 — #1 「괜찮습니까？」 #4 「장비 못 합니다！」
+    # #8 「못 버린다！！」 #145 「〜을 버려도 괜찮습니까？」. 그리고 설명문을
+    # 아예 빼먹어서, 힐을 선택하면(설명문 표시) 게임이 멈췄다.
+    #
+    # 기준을 뒤집었다. **이야기 대사가 아니면 메뉴로 본다.** 이야기 대사는
+    # 이름표(<FB>)·초상화(<F2>)를 달거나 「 로 시작하고, 패치된 대사
+    # 렌더러($950F)가 그린다. 그 밖은 전부 시스템·UI·표다.
+    #
+    #   이야기 대사 780개 / 그 밖 286개
+    #   합집합 고유 음절 494자 / 메뉴 안전 슬롯 651칸 (여유 157칸)
+    def is_story(txt):
+        return "<FB>" in txt or "<F2>" in txt or txt.lstrip().startswith("「")
+
+    menu_txt = ([txt for _, txt in dlg_addr if not is_story(txt)]
+                + [txt for _, _, txt in desc_items]
+                + list(words.texts()) + list(nametbl.texts()))
     no_risky = set()
-    for txt in menu_txt + list(words.texts()) + list(nametbl.texts()):
+    for txt in menu_txt:
         for kind, v in krcodec.parse(txt):
             if kind == "ch" and krcodec.is_hangul(v): no_risky.add(v)
 
