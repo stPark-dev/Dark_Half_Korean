@@ -286,6 +286,16 @@ def report(tsv, worst=12):
         for i, f, e in chbad[:worst]:
             print(f"   #{i}: |{f}|  {e}")
 
+    # [11] 엔딩 조각 예산. trcheck 가 대사·표만 보고 엔딩을 안 봐서, 배정이
+    # 밀릴 때마다 build 단계에서야 초과가 드러났다 (그러면 codes.json 이 안
+    # 갱신되고 verify 가 낡은 것을 읽어 엉뚱한 KeyError 로 죽는다).
+    import patch_ending
+    eover = patch_ending.apply(bytearray(orig), codes, tbl)
+    if eover:
+        print(f"\n!! 엔딩 조각 예산 초과 {len(eover)}개 (제자리라 늘릴 수 없다)")
+        for sid, kr, n, capn in eover[:worst]:
+            print(f"   엔딩 #{sid}: {n}/{capn}바이트  {kr}")
+
     over, bad = [], []
     used = 0
     for i, cap, t in done:
@@ -304,10 +314,10 @@ def report(tsv, worst=12):
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
     if not (over or bad or leftover or orphan or jbad or longbad or embed
-            or invade or ctlbad or chbad):
+            or invade or ctlbad or chbad or eover):
         print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0,"
               f" 고아 프리픽스 0, 조사 불일치 0, 장음 0, 한글속한자 0, 표침범 0,"
-              f" 제어 코드 불일치 0, 선택항목 0")
+              f" 제어 코드 불일치 0, 선택항목 0, 엔딩 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
