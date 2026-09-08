@@ -99,7 +99,7 @@ def parse(text):
 def is_hangul(ch):
     return 0xAC00 <= ord(ch) <= 0xD7A3
 
-def allocate(texts, base_table, priority=(), force=()):
+def allocate(texts, base_table, priority=(), force=(), no_f4=()):
     """번역문들에서 음절 빈도를 세어 코드 배정.
     priority 에 든 문자열의 음절은 단일바이트를 먼저 받는다.
     (메뉴 라벨처럼 예산이 3~8바이트로 빡빡한 곳을 우선 보장)
@@ -130,7 +130,38 @@ def allocate(texts, base_table, priority=(), force=()):
     for c in single: slots.append(bytes([c]))
     for bank, idxs in BANK_SLOTS.items():
         for i in idxs: slots.append(bytes([bank, i]))
-    for ch, slot in zip(ordered, slots): codes[ch] = slot
+
+    # no_f4: 이 음절들에는 F4 이스케이프를 주지 않는다.
+    #
+    # F4 는 다른 뱅크와 성질이 다르다. F4 xx 는 글리프 xx 를 가리키는데,
+    # 단일바이트로 쓸 수 있는 글리프는 단일바이트로 쓰므로 F4 는 "바이트 값이
+    # 제어 코드와 겹쳐 단일바이트로 못 쓰는 글리프"에만 남는다. 즉 F4 의 두 번째
+    # 바이트는 항상 제어 코드 값이다 (F4_SLOTS = 0x00~0x1F, 0xE6~0xFF).
+    #
+    # 대사 렌더러는 F4 를 처리한다 (원문도 <F4><魔> 로 魔 를 쓴다). 그러나
+    # 메뉴 라벨·이름표 렌더러는 처리하지 않는다. 원본 표를 전수 확인한 결과:
+    #
+    #   라벨 표     F4 0개 / F5~F7 0개
+    #   몬스터 이름  F4 0개 / F5~F7 14개
+    #   화자 이름표  F4 0개 / F5~F7 0개
+    #   아이템표     F4 1개 / F5~F7 1개
+    #
+    # F5~F7 은 쓰는데 F4 는 안 쓴다. 그래서 #1222 「진형」을 f4 1f f4 ef 로
+    # 넣었더니 라벨 렌더러가 0x1F 를 제어 코드로 읽고 메뉴에서 멈췄다.
+    #
+    # 뱅크 이스케이프는 어느 뱅크든 2바이트라 재배치 비용이 0이다. 표 음절이
+    # 건너뛴 F4 슬롯은 뒤의 대사 전용 음절이 받으므로 총 슬롯 소비도 같다
+    # (5D/D5 로 흘러넘치지 않는다).
+    nf = set(no_f4)
+    held = []
+    it = iter(slots)
+    for ch in ordered:
+        if ch not in nf and held:
+            codes[ch] = held.pop(0); continue
+        for slot in it:
+            if len(slot) == 2 and slot[0] == 0xF4 and ch in nf:
+                held.append(slot); continue
+            codes[ch] = slot; break
     n1 = sum(freq[c] for c, s in codes.items() if len(s) == 1)
     n2 = sum(freq[c] for c, s in codes.items() if len(s) == 2)
     stats = {"unique": len(ordered), "capacity": capacity(),

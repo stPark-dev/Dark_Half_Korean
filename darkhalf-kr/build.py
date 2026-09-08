@@ -62,6 +62,8 @@ def plan(orig, rows, t):
     desc_items = [(runs[i][0] + PREFIX, runs[i][1] - PREFIX, txt)
                   for i, txt in DESC.items()]
     dlg = [(int(c[3]), c[8]) for c in rows if len(c) > 8 and c[8].strip()]
+    # (주소, 번역문) — 메뉴·표 구역 판별에 쓴다
+    dlg_addr = [(int(c[2], 16), c[8]) for c in rows if len(c) > 8 and c[8].strip()]
 
     # 단어표·이름표는 원본 칸이 좁다 (腕輪 는 2바이트). extra 로 넘기면 우선
     # 배정을 못 받아 2바이트 코드가 걸리고 칸을 넘긴다. 용량과 함께 pairs 로
@@ -87,9 +89,21 @@ def plan(orig, rows, t):
     # 최우선으로 넣지만, 우선 대상 음절 수가 단일바이트 칸보다 많아 밀린다.
     # 같은 표의 다른 엔트리(노파·용병Ｅ·시체·분신)는 이미 한국어라, 하나만
     # 일본어로 남으면 화자 이름이 섞인다. 그래서 「호」만 명시로 강제한다.
+    # 메뉴·표 영역에 실리는 음절은 F4 이스케이프를 받으면 안 된다.
+    # 그 렌더러들은 F4 를 처리하지 않아 두 번째 바이트를 제어 코드로 읽는다
+    # (krcodec.allocate 의 no_f4 주석 참조 — #1222 「진형」이 메뉴를 멈췄다).
+    #
+    # 0x04e000 이상이 그 구역이다: 이동 목록, 메뉴 라벨 표, 아이템표,
+    # 마법 이름표, 몬스터 이름표, 화자 이름표.
+    menu_txt = [txt for cap, txt in dlg_addr if cap >= 0x04e000]
+    no_f4 = set()
+    for txt in menu_txt + list(words.texts()) + list(nametbl.texts()):
+        for kind, v in krcodec.parse(txt):
+            if kind == "ch" and krcodec.is_hangul(v): no_f4.add(v)
+
     force = {"호"}
     for _ in range(8):
-        codes, freq, st = tralloc.allocate(pairs, t, force=force)
+        codes, freq, st = tralloc.allocate(pairs, t, force=force, no_f4=no_f4)
         probe = bytearray(orig)
         miss = ([kr for _, kr, _, _ in patch_words.apply(probe, codes, t)]
                 + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)])
