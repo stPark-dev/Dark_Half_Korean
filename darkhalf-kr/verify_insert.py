@@ -164,7 +164,7 @@ def main(orig_p, new_p, tsv):
             r, i = [], 0
             while i < len(buf) - 1:
                 if buf[i] in (0xF4, 0xF5, 0xF6, 0xF7, 0x5D, 0xD5):
-                    if buf[i] in krcodec.RISKY_PREFIX:
+                    if not krcodec.menu_safe(buf[i:i+2]):
                         r.append((hex(buf[i]), hex(buf[i+1])))
                     i += 2
                 else: i += 1
@@ -172,7 +172,7 @@ def main(orig_p, new_p, tsv):
         got, was = risky(new[a:a+n]), risky(orig[a:a+n])
         if len(got) > len(was):
             f4bad.append((c[0], tr[:16], got))
-    print(f"[9] 메뉴·표 영역 F4 이스케이프: {len(f4bad)}건"
+    print(f"[9] 메뉴·표 영역 위험 이스케이프: {len(f4bad)}건"
           + (f" {f4bad[:4]}" if f4bad else ""))
     fail += len(f4bad)
 

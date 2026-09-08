@@ -90,8 +90,29 @@ BANKS = [(b, len(v)) for b, v in BANK_SLOTS.items()]
 # F4 는 원본 렌더러가 처리하지만 F4_SLOTS 의 둘째 바이트가 제어 코드 값이라
 # 위험하고, 지금은 배정 풀에서 빠져 있다. 5D/D5 는 엔진 패치가 추가한 것이라
 # 대사·옵션·엔딩 렌더러만 안다 (patch_engine 이 $950F / $5CFA 두 곳을 고친다).
-# 메뉴·표 문자열에는 이 프리픽스가 실려서는 안 된다.
 RISKY_PREFIX = {0xF4, 0x5D, 0xD5}
+
+# 메뉴·표에 실을 수 있는 슬롯 (PROGRESS 4.15).
+#
+# 이스케이프의 둘째 바이트가 0x20 미만이면 메뉴·표 렌더러가 그것을 제어 코드로
+# 읽는다. 실기에서 확인한 대조군:
+#
+#   괜 = f5 64   정상        찮 = f5 58   정상
+#   예 = f5 1e   깨짐        힐 = f7 13   깨짐
+#   진 = f4 1f   정지 (F4 프리픽스까지 겹치면 멈춘다)
+#
+# 원본 표가 F5~F7 을 쓰므로(몬스터 이름 14곳) 프리픽스 자체는 문제가 아니다.
+# 둘째 바이트 값이 문제다.
+#
+# 안전 슬롯 수: 단일 142 + F5 223 + F6 223 + F7 63 = 651.
+# 메뉴·표 고유 음절은 359자라 여유가 있다.
+MENU_MIN_IDX = 0x20
+
+
+def menu_safe(slot):
+    """이 슬롯을 메뉴·표 문자열에 써도 되는가."""
+    if len(slot) == 1: return True
+    return slot[0] not in RISKY_PREFIX and slot[1] >= MENU_MIN_IDX
 BANK_TAG = {'D': 0xF4, 'A': 0xF5, 'B': 0xF6, 'C': 0xF7, 'E': 0x5D, 'F': 0xD5}
 
 def capacity():
@@ -176,8 +197,8 @@ def allocate(texts, base_table, priority=(), force=(), no_risky=()):
     # 건너뛴 F4 슬롯은 뒤의 대사 전용 음절이 받으므로 총 슬롯 소비도 같다
     # (5D/D5 로 흘러넘치지 않는다).
     nf = set(no_risky)
-    safe  = [x for x in slots if not (len(x) == 2 and x[0] in RISKY_PREFIX)]
-    risky = [x for x in slots if       len(x) == 2 and x[0] in RISKY_PREFIX]
+    safe  = [x for x in slots if     menu_safe(x)]
+    risky = [x for x in slots if not menu_safe(x)]
 
     # 뒤에 남은 no_risky 음절 수를 미리 세어 안전 슬롯을 그만큼 남겨 둔다.
     # 남겨 두지 않으면 희귀한 표 음절이 배정을 못 받는다 — 단어표 [07] 「에놋」
@@ -191,7 +212,7 @@ def allocate(texts, base_table, priority=(), force=(), no_risky=()):
     for i, ch in enumerate(ordered):
         if ch in nf or len(safe) - si > remain[i + 1]:
             if si >= len(safe):
-                raise SystemExit(f"안전 슬롯 부족: 메뉴·표 음절 {len(nf)}자 > "
+                raise SystemExit(f"메뉴 안전 슬롯 부족: 메뉴·표 음절 {len(nf)}자 > "
                                  f"{len(safe)}칸. 표에 쓰는 어휘를 줄여야 합니다.")
             codes[ch] = safe[si]; si += 1
         else:
