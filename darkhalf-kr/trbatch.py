@@ -54,7 +54,11 @@ def save(tsv, rows):
 def is_jp(c):
     return len(KANA.findall(c[7])) >= 2
 
-RUN = re.compile(r'[ぁ-んァ-ヶ一-鿿]{4,}')   # 4자 이상 연속 = 산문
+RUN  = re.compile(r'[ぁ-んァ-ヶ一-鿿]{4,}')   # 4자 이상 연속 = 산문
+# 가나 3연속 = 문장. 산문(4연속)보다 느슨하다. 남은 세그먼트 대부분은 메뉴
+# 레이아웃이라 제어 코드 사이에 가나가 파라미터로 한두 자 박혀 있는데, 그건
+# 텍스트가 아니다. 3연속 기준으로 183개 중 57개가 실제 대사로 걸러진다.
+TEXT = re.compile(r'[ぁ-んァ-ヶー]{3,}')
 
 def table_owned():
     """이름표·단어표가 소유한 주소 구간.
@@ -67,7 +71,22 @@ def table_owned():
     import nametbl, words
     r = [(sp["data"], sp["limit"]) for sp, _ in nametbl.TABLES]
     r.append((words.DATA, words.DATA_LIMIT))
+    # 아이템·장비 이름표 (PROGRESS 4.7). 문자열이 서로 겹쳐 제자리도 재배치도
+    # 막혀 있어 손대지 않기로 판단한 구간이다. 그런데 여기가 빠져 있어서
+    # 작업 목록에 장비 이름이 그대로 떴다 (#1223 0x04f1c0, #1261, #1269, #1315).
+    # 배치 79 와 같은 표침범을 네 번째로 되풀이할 자리였다.
+    r.append((0x04f1c0, 0x04f470))
     return r
+
+
+# F7 뱅크 상위 슬롯(0x3F~0xDD)은 글리프가 아니다. 엔딩 텍스트와 그 뒤 미식별
+# 데이터가 그 자리에 있어서, 렌더하면 노이즈가 나온다 (0x4B/0x77/0x85/0x8F 확인).
+# 그래서 f7 XX 를 품은 세그먼트는 텍스트가 아니다. 몬스터 이름표에 이런 게
+# 다섯 개(#1333 #1334 #1341 #1344 #1350) 섞여 있는데, 접미사 공유가 <EE> 만
+# 쓰는 게 아니라는 뜻이거나 아예 이름이 아니라는 뜻이다. 어느 쪽이든 손대면 안 된다.
+def has_nonglyph_f7(hexstr):
+    b = bytes.fromhex(hexstr)
+    return any(b[i] == 0xF7 and 0x3F <= b[i+1] <= 0xDD for i in range(len(b) - 1))
 
 
 def has_inner_ptr(hexstr):
@@ -88,17 +107,18 @@ def has_inner_ptr(hexstr):
     return False
 
 
-def todo(rows, prose_only=False):
+def todo(rows, prose_only=False, text_only=False):
     owned = table_owned()
     t = [c for c in rows if is_jp(c) and not c[8].strip()
          and not any(lo <= int(c[2], 16) < hi for lo, hi in owned)
-         and not has_inner_ptr(c[5])]
+         and not has_inner_ptr(c[5]) and not has_nonglyph_f7(c[5])]
     if prose_only: t = [c for c in t if RUN.search(c[7])]
+    if text_only:  t = [c for c in t if TEXT.search(c[7])]
     return t
 
-def cmd_show(tsv, start, count, prose_only=False):
-    rows = load(tsv); t = todo(rows, prose_only)
-    tag = "산문" if prose_only else "일본어"
+def cmd_show(tsv, start, count, prose_only=False, text_only=False):
+    rows = load(tsv); t = todo(rows, prose_only, text_only)
+    tag = "산문" if prose_only else ("문장" if text_only else "일본어")
     print(f"미번역 {tag} 세그먼트 {len(t)}개 중 {start}~{start+count-1}\n")
     for c in t[start:start+count]:
         free, syl = budget(c[7], int(c[3]))
@@ -153,7 +173,7 @@ def cmd_stat(tsv):
 if __name__ == "__main__":
     c = sys.argv[1]
     if   c == "show": cmd_show(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]),
-                               "--prose" in sys.argv)
+                               "--prose" in sys.argv, "--text" in sys.argv)
     elif c == "set":  cmd_set(sys.argv[2], sys.argv[3])
     elif c == "new":  cmd_new(sys.argv[2], sys.argv[3])
     elif c == "stat": cmd_stat(sys.argv[2])
