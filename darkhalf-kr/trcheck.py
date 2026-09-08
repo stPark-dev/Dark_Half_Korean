@@ -112,6 +112,30 @@ def report(tsv, worst=12):
         for i, ch, ctx in longbad[:worst]:
             print(f"   #{i}: {ch!r}   …{ctx}…")
 
+    # 표 구간 침범 검사.
+    # 이름표·단어표 문자열이 대사 뱅크 안에 있어서 추출기가 그것까지 대사
+    # 세그먼트로 잡는다 (마법 이름 0x04f3d3 = #1295 등). 그 자리를 대사로
+    # 번역하면 표와 충돌한다. build 는 대사를 먼저 쓰고 표를 나중에 쓰므로
+    # 표가 이기지만, 대사 쪽 길이와 종료자가 어긋나 역검증 [1] 이 깨진다.
+    #
+    # 실제로 배치 79 에서 마법 이름 7개를 대사로도 번역해 [1] 이 7건
+    # 불일치였다. 표가 정본이므로 그 자리는 미번역으로 두어야 한다.
+    # 배치 42 의 MENU 충돌과 같은 종류이고, 이번이 세 번째다.
+    import nametbl, words
+    OWNED = [(sp["data"], sp["limit"], sp["name"]) for sp, _ in nametbl.TABLES]
+    OWNED.append((words.DATA, words.DATA_LIMIT, "단어표"))
+    invade = []
+    for c in rows:
+        if len(c) < 9 or not c[8].strip(): continue
+        a = int(c[2], 16)
+        for lo, hi, nm in OWNED:
+            if lo <= a < hi:
+                invade.append((c[0], nm, c[8][:20])); break
+    if invade:
+        print(f"\n!! 표 구간을 대사로 번역했다 {len(invade)}건 (표가 정본이다)")
+        for i, nm, t in invade[:worst]:
+            print(f"   #{i}: {nm} 구간   {t}")
+
     # 단어표 뒤 조사 일치 검사.
     # <EB>xx 는 런타임에 단어를 끼워 넣으므로, 삽입되는 단어의 종성에 따라
     # 뒤 조사의 형태가 갈린다. 단어표를 해독하기 전에는 알 수 없어서
@@ -204,9 +228,9 @@ def report(tsv, worst=12):
         print(f"\n!! 예산 초과 세그먼트 {len(over)}개 / {len(done)}개")
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
-    if not over and not bad and not leftover and not orphan and not jbad and not longbad and not embed:
+    if not over and not bad and not leftover and not orphan and not jbad and not longbad and not embed and not invade:
         print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0,"
-              f" 고아 프리픽스 0, 조사 불일치 0, 장음 0, 한글속한자 0")
+              f" 고아 프리픽스 0, 조사 불일치 0, 장음 0, 한글속한자 0, 표침범 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
@@ -244,7 +268,7 @@ def report(tsv, worst=12):
     tail = sorted(c for c in freq if freq[c] <= 2)
     print(f"출현 1~2회 음절 {len(tail)}자 (이 음절들을 기존 음절로 바꾸면 여유가 생긴다)")
     if tail: print("  " + "".join(tail[:80]))
-    return 1 if (over or bad or leftover or orphan or jbad or longbad or embed) else 0
+    return 1 if (over or bad or leftover or orphan or jbad or longbad or embed or invade) else 0
 
 if __name__ == "__main__":
     a = sys.argv[1:]
