@@ -82,7 +82,12 @@ def plan(orig, rows, t):
     # 단어표·이름표는 칸이 고정이라(腕輪 는 2바이트) 강제가 유일한 수단이지만,
     # 엔딩 조각은 8~17바이트이고 가운데맞춤 공백까지 있어 고쳐 쓸 여지가 넓다.
     # 그래서 엔딩 초과는 endbatch check 로 드러내고 사람이 문장을 고친다.
-    force = set()
+    # 화자 이름표(0x04f8aa~)의 「호세」는 칸이 2바이트인데 「호」가 2바이트라
+    # 3이 필요하다. tralloc 의 priority 는 free/syl 이 1.0 인 이 세그먼트를
+    # 최우선으로 넣지만, 우선 대상 음절 수가 단일바이트 칸보다 많아 밀린다.
+    # 같은 표의 다른 엔트리(노파·용병Ｅ·시체·분신)는 이미 한국어라, 하나만
+    # 일본어로 남으면 화자 이름이 섞인다. 그래서 「호」만 명시로 강제한다.
+    force = {"호"}
     for _ in range(8):
         codes, freq, st = tralloc.allocate(pairs, t, force=force)
         probe = bytearray(orig)
