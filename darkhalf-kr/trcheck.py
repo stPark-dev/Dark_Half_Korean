@@ -237,6 +237,28 @@ def report(tsv, worst=12):
         for i, lo, gi, t in ctlbad[:worst]:
             print(f"   #{i}: 잃음={lo} 얻음={gi}  {t[:44]}")
 
+    # [10] 선택 항목(<ED>出 … <ED> )은 단일바이트 음절만 써야 한다.
+    #
+    # 이 필드는 바이트 하나를 타일 하나로 그린다. 이스케이프를 넣으면 두
+    # 글리프로 갈라진다. 「예」(f5 3e)가 확인 창에서 깨진 글리프 두 개로
+    # 나왔다 (image/problem_015.png). 「네」(0x9a)로 바꿔 해결했다.
+    #
+    # 같은 창의 「괜찮습니까？」 는 이스케이프를 써도 정상이다. 창이 아니라
+    # 필드가 다르다.
+    CHOICE = re.compile(r'<ED>出(.*?)<ED> ')
+    one = {c for c, v in codes.items() if len(v) == 1}
+    chbad = []
+    for i, cap, t in done:
+        for m in CHOICE.finditer(t):
+            esc = [c for c in m.group(1)
+                   if krcodec.is_hangul(c) and c not in one]
+            if esc: chbad.append((i, m.group(1), "".join(esc)))
+    if chbad:
+        print(f"\n!! 선택 항목에 이스케이프 {len(chbad)}건"
+              f" (바이트 하나가 타일 하나다)")
+        for i, f, e in chbad[:worst]:
+            print(f"   #{i}: |{f}|  이스케이프={e}")
+
     over, bad = [], []
     used = 0
     for i, cap, t in done:
@@ -255,10 +277,10 @@ def report(tsv, worst=12):
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
     if not (over or bad or leftover or orphan or jbad or longbad or embed
-            or invade or ctlbad):
+            or invade or ctlbad or chbad):
         print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0,"
               f" 고아 프리픽스 0, 조사 불일치 0, 장음 0, 한글속한자 0, 표침범 0,"
-              f" 제어 코드 불일치 0")
+              f" 제어 코드 불일치 0, 선택항목 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
