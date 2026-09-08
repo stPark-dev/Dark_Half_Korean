@@ -58,8 +58,13 @@ def blocks(rom, entry):
     """엔트리의 서브 블록 절대 주소 목록. 0xFFFF 는 건너뛴다."""
     a = TABLE + entry * 4
     base = ((rom[a + 2] - 0xC0) << 16) | rom[a] | (rom[a + 1] << 8)
+    # 첫 오프셋이 목록 길이를 알려준다. 64개를 무조건 읽으면 뒤쪽은 블록
+    # 데이터를 오프셋으로 오해해 엉뚱한 주소가 섞인다 (칸 계산이 523 으로
+    # 나와 제자리 삽입이 막혔다).
+    first = rom[base] | (rom[base+1] << 8)
+    n = first // 2
     out = []
-    for k in range(64):
+    for k in range(n):
         o = rom[base + k*2] | (rom[base + k*2 + 1] << 8)
         if o == 0xFFFF: out.append(None); continue
         out.append(base + 1 + o)          # $30 은 표 시작+1 이다
