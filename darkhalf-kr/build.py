@@ -89,9 +89,10 @@ def plan(orig, rows, t):
     # 최우선으로 넣지만, 우선 대상 음절 수가 단일바이트 칸보다 많아 밀린다.
     # 같은 표의 다른 엔트리(노파·용병Ｅ·시체·분신)는 이미 한국어라, 하나만
     # 일본어로 남으면 화자 이름이 섞인다. 그래서 「호」만 명시로 강제한다.
-    # 메뉴·표 영역에 실리는 음절은 F4 이스케이프를 받으면 안 된다.
-    # 그 렌더러들은 F4 를 처리하지 않아 두 번째 바이트를 제어 코드로 읽는다
-    # (krcodec.allocate 의 no_f4 주석 참조 — #1222 「진형」이 메뉴를 멈췄다).
+    # 메뉴·표 영역에 실리는 음절은 위험 프리픽스(F4·5D·D5)를 받으면 안 된다.
+    # F4 는 둘째 바이트가 제어 코드 값이고(#1222 「진형」이 메뉴를 멈췄다),
+    # 5D·D5 는 엔진 패치가 추가한 것이라 대사·옵션·엔딩 렌더러만 안다.
+    # krcodec.RISKY_PREFIX 주석 참조.
     #
     # 경계를 0x04e000 으로 둔다. 정지를 실제로 낸 것은 0x04f000 이상의 표뿐이고
     # (이분 탐색 E 롬), 그 아래 0x04e000 대에는 일반 대사도 섞여 있다. 그래도
@@ -103,14 +104,14 @@ def plan(orig, rows, t):
     # 받으므로 5D/D5 로 넘치지 않는다 (확인: 단일 142 / F4 57 / F5 255 / F6 255
     # / F7 95, 5D·D5 0).
     menu_txt = [txt for cap, txt in dlg_addr if cap >= 0x04e000]
-    no_f4 = set()
+    no_risky = set()
     for txt in menu_txt + list(words.texts()) + list(nametbl.texts()):
         for kind, v in krcodec.parse(txt):
-            if kind == "ch" and krcodec.is_hangul(v): no_f4.add(v)
+            if kind == "ch" and krcodec.is_hangul(v): no_risky.add(v)
 
     force = {"호"}
     for _ in range(8):
-        codes, freq, st = tralloc.allocate(pairs, t, force=force, no_f4=no_f4)
+        codes, freq, st = tralloc.allocate(pairs, t, force=force, no_risky=no_risky)
         probe = bytearray(orig)
         miss = ([kr for _, kr, _, _ in patch_words.apply(probe, codes, t)]
                 + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)])
@@ -121,7 +122,7 @@ def plan(orig, rows, t):
     return codes, freq, st, force, desc_items, dlg
 
 
-def main(src, tsv, dst, engine=False):
+def main(src, tsv, dst, engine=True):
     rom = bytearray(open(src, 'rb').read())
     orig = bytes(rom)          # 칸 계산은 원본 배치로만 해야 한다
     t = load_tbl(TBL)
@@ -213,4 +214,4 @@ def main(src, tsv, dst, engine=False):
 
 if __name__ == "__main__":
     a = [x for x in sys.argv[1:] if not x.startswith("--")]
-    main(a[0], a[1], a[2], engine="--engine" in sys.argv)
+    main(a[0], a[1], a[2], engine="--no-engine" not in sys.argv)

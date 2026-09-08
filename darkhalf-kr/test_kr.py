@@ -23,7 +23,12 @@ def main(rom_path):
     check("F6 뱅크 255슬롯 (0xFF 제외)", banks.get(0xF6) == 255, f"{banks.get(0xF6)}")
     check("F7 뱅크 95슬롯 (0x00-0x3D + 0xDE-0xFE)", banks.get(0xF7) == 95, f"{banks.get(0xF7)}")
 
-    check("F4 뱅크 57슬롯 (0x00-0x1F + 0xE6-0xFE)", banks.get(0xF4) == 57, f"{banks.get(0xF4)}")
+    # F4 는 배정 풀에서 빠져 있어야 한다 (PROGRESS 4.12 / 4.13).
+    # 두 가지 이유가 겹친다. (1) F4_SLOTS 의 글리프는 원본이 쓴다 — 0x00 魔,
+    # 0x04 ◀, 0x05 ▶, 0x06~0x1F 탁음 가나. 한글을 배정하면 덮인다.
+    # (2) F4 의 둘째 바이트는 항상 제어 코드 값이라, F4 를 처리하지 않는
+    # 메뉴·표 렌더러가 그것을 제어 코드로 읽고 게임이 멈춘다.
+    check("F4 는 배정 풀에 없다", 0xF4 not in banks, f"{banks.get(0xF4)}")
     check("신규 프리픽스 $5D 255슬롯 (0xFF 제외)", banks.get(0x5D) == 255, f"{banks.get(0x5D)}")
     check("신규 프리픽스 $D5 255슬롯 (0xFF 제외)", banks.get(0xD5) == 255, f"{banks.get(0xD5)}")
     check("프리픽스 바이트는 단일바이트 배정 제외",
@@ -35,7 +40,8 @@ def main(rom_path):
     # 143 이었다가 0xA0(♥) 을 KEEP 으로 옮겨 하나 줄었다. ♥ 는 본문 문장부호가
     # 아니라 UI 표시 글리프여서 회수하면 아이템 창이 깨진다 (krcodec.KEEP 주석).
     check("단일바이트 회수 142개 (프리픽스 $5D/$D5, ♥ 제외)", len(krcodec.reclaimable()) == 142, f"{len(krcodec.reclaimable())}")
-    check("전면 번역 수용량 1314자", krcodec.capacity() == 1314, f"{krcodec.capacity()}")
+    # F4 57칸을 뺀 값. 필요량은 약 836자다 (trcheck 외삽).
+    check("전면 번역 수용량 1257자", krcodec.capacity() == 1257, f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"
     check("가나 보존 시 단일바이트 32개", len(krcodec.reclaimable()) == 32, f"{len(krcodec.reclaimable())}")
     os.environ.pop("DH_KEEP_KANA", None)

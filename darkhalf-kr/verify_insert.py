@@ -68,8 +68,13 @@ def main(orig_p, new_p, tsv):
         return any(lo <= a < hi or lo < a+64 <= hi for lo, hi in ewr)
 
     want_addr = {slot_addr(s) for s in codes.values()}
-    changed = {a for a in range(*FONT, 64)
-               if new[a:a+64] != orig[a:a+64] and not in_ending(a)}
+    # 엔진 패치를 켜면 인덱스 1024~ 가 뱅크 $F0 = ROM 0x300000 에 놓인다.
+    # 롬이 4MB 로 늘어나므로 그 구간까지 훑어야 한다 (PROGRESS 1.2.2).
+    hi_end = min(len(orig), len(new))
+    scan_end = 0x308000 if len(new) > FONT[1] else FONT[1]
+    changed = {a for a in range(FONT[0], scan_end, 64)
+               if new[a:a+64] != (orig[a:a+64] if a < hi_end else b'\xff'*64)
+               and not in_ending(a)}
     same = changed == want_addr
     print(f"[3] 폰트 변경 슬롯 {len(changed)}개 / 배정 {len(want_addr)}개  일치={same}")
     if not same:
@@ -98,13 +103,21 @@ def main(orig_p, new_p, tsv):
         NAME_R.append((spec["ptr"], spec["ptr"] + 2*spec["count"]))
         NAME_R.append((spec["data"], spec["limit"]))
 
+    # 엔진 패치가 고치는 자리 (PROGRESS 1.2.2 / patch_engine.py).
+    # 이스케이프 판별 두 곳, DMA 꼬리, 그리고 새 코드를 놓는 빈 공간.
+    ENGINE_R = [(0x00950F, 0x00950F + 39), (0x005CFA, 0x005CFA + 37),
+                (0x009548, 0x009548 + 63),
+                (0x00F200, 0x00F240), (0x00F260, 0x00F2A0),
+                (0x00F300, 0x00F360)]
+
     out = [i for i in range(len(orig)) if orig[i] != new[i]
            and not (TEXT[0] <= i < TEXT[1]) and not (FONT[0] <= i < FONT[1])
            and not (WORD_PTR[0] <= i < WORD_PTR[1])
            and not (WORD_STR[0] <= i < WORD_STR[1])
            and not any(a <= i < b for a, b in DESC_R)
            and not any(a <= i < b for a, b in NAME_R)
-           and not (0xFFDC <= i <= 0xFFDF)]
+           and not (0xFFDC <= i <= 0xFFDF)
+           and not any(a <= i < b for a, b in ENGINE_R)]
     print(f"[5] 허용 영역 밖 변경 {len(out)}바이트"); fail += len(out)
 
     # 포인터를 실제로 따라가 되읽는다. 포인터와 문자열이 함께 옳아야 통과한다.
@@ -136,9 +149,29 @@ def main(orig_p, new_p, tsv):
         if not tr: continue
         a = int(c[2], 16)
         if a < 0x04e000: continue
-        b = new[a:a + int(c[3])]
-        hit = [hex(b[i+1]) for i in range(len(b)-1) if b[i] == 0xF4]
-        if hit: f4bad.append((c[0], tr[:16], hit))
+        n = int(c[3])
+        # 바이트를 단순 스캔하면 이스케이프의 '둘째' 바이트까지 잡는다
+        # (F5 F4 를 F4 이스케이프로 오인). 렌더러와 같은 규칙으로 걷는다:
+        # F4~F7·5D·D5 는 2바이트, 나머지는 1바이트.
+        #
+        # 그래도 제어 코드의 파라미터는 구분하지 못한다. 제어 코드마다 파라미터
+        # 길이가 다르고 우리는 그 표를 갖고 있지 않다. #1187 「<FD>ゆ<F0>」 의
+        # ゆ(0xD5)는 FD 의 파라미터인데 프리픽스로 오인됐다.
+        #
+        # 그래서 절대 개수가 아니라 원본과의 차이를 본다. 원본에 있던 것은
+        # 게임이 그대로 돌던 것이므로 문제가 아니다. 우리가 새로 넣은 것만 잡는다.
+        def risky(buf):
+            r, i = [], 0
+            while i < len(buf) - 1:
+                if buf[i] in (0xF4, 0xF5, 0xF6, 0xF7, 0x5D, 0xD5):
+                    if buf[i] in krcodec.RISKY_PREFIX:
+                        r.append((hex(buf[i]), hex(buf[i+1])))
+                    i += 2
+                else: i += 1
+            return r
+        got, was = risky(new[a:a+n]), risky(orig[a:a+n])
+        if len(got) > len(was):
+            f4bad.append((c[0], tr[:16], got))
     print(f"[9] 메뉴·표 영역 F4 이스케이프: {len(f4bad)}건"
           + (f" {f4bad[:4]}" if f4bad else ""))
     fail += len(f4bad)

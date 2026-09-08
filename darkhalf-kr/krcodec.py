@@ -60,8 +60,23 @@ PFX_NEW = {0x5D: 256, 0xD5: 256}
 # 슬롯 6개(뱅크별 1개)를 잃는다. 수용량 1320 -> 1314.
 _NO_FF = lambda xs: [i for i in xs if i != 0xFF]
 
+# F4 는 배정에서 뺐다 (PROGRESS 4.13).
+#
+# F4 xx 는 글리프 xx 를 가리키고, F4_SLOTS 는 "바이트 값이 제어 코드와 겹쳐
+# 단일바이트로 못 쓰는 글리프"다. 그런데 그 글리프들은 원본이 쓰고 있다.
+#
+#   0x00 魔  0x01 士  0x02 見  0x1F 入   원문 <F4><魔> 등 (CTRL_KANJI_REV)
+#   0x04 ◀   0x05 ▶                      메뉴 화살표
+#   0x06~0x1F ガギグゲゴ…                미번역 이름의 탁음 가나
+#
+# 여기에 한글을 배정하면 그 글리프가 덮인다. 실제로 57칸 전부 덮고 있었다.
+# 게다가 F4 의 둘째 바이트는 항상 제어 코드 값이라, F4 를 처리하지 않는
+# 메뉴·표 렌더러에서 게임이 멈춘다 (4.12, #1222 「진형」).
+#
+# 대신 엔진 패치의 5D/D5 를 쓴다. 수용량 1314 -> 1257 이고 필요량은 약 836 이다.
+# CTRL_KANJI_REV 의 F4 인코딩은 그대로 둔다 — 원본 한자를 되돌리는 경로이고,
+# 배정에서 빠졌으니 이제 그 글리프가 온전하다.
 BANK_SLOTS = {
-    0xF4: _NO_FF(F4_SLOTS),
     0xF5: _NO_FF(range(0, 256)),
     0xF6: _NO_FF(range(0, 256)),
     0xF7: _NO_FF(list(range(0x00, 0x3E)) + list(range(0xDE, 0x100))),
@@ -69,6 +84,14 @@ BANK_SLOTS = {
     0xD5: _NO_FF(range(0, 256)),
 }
 BANKS = [(b, len(v)) for b, v in BANK_SLOTS.items()]
+
+# 패치한 렌더러만 아는 프리픽스. 메뉴·표 렌더러는 모른다.
+#
+# F4 는 원본 렌더러가 처리하지만 F4_SLOTS 의 둘째 바이트가 제어 코드 값이라
+# 위험하고, 지금은 배정 풀에서 빠져 있다. 5D/D5 는 엔진 패치가 추가한 것이라
+# 대사·옵션·엔딩 렌더러만 안다 (patch_engine 이 $950F / $5CFA 두 곳을 고친다).
+# 메뉴·표 문자열에는 이 프리픽스가 실려서는 안 된다.
+RISKY_PREFIX = {0xF4, 0x5D, 0xD5}
 BANK_TAG = {'D': 0xF4, 'A': 0xF5, 'B': 0xF6, 'C': 0xF7, 'E': 0x5D, 'F': 0xD5}
 
 def capacity():
@@ -99,7 +122,7 @@ def parse(text):
 def is_hangul(ch):
     return 0xAC00 <= ord(ch) <= 0xD7A3
 
-def allocate(texts, base_table, priority=(), force=(), no_f4=()):
+def allocate(texts, base_table, priority=(), force=(), no_risky=()):
     """번역문들에서 음절 빈도를 세어 코드 배정.
     priority 에 든 문자열의 음절은 단일바이트를 먼저 받는다.
     (메뉴 라벨처럼 예산이 3~8바이트로 빡빡한 곳을 우선 보장)
@@ -152,16 +175,29 @@ def allocate(texts, base_table, priority=(), force=(), no_f4=()):
     # 뱅크 이스케이프는 어느 뱅크든 2바이트라 재배치 비용이 0이다. 표 음절이
     # 건너뛴 F4 슬롯은 뒤의 대사 전용 음절이 받으므로 총 슬롯 소비도 같다
     # (5D/D5 로 흘러넘치지 않는다).
-    nf = set(no_f4)
-    held = []
-    it = iter(slots)
-    for ch in ordered:
-        if ch not in nf and held:
-            codes[ch] = held.pop(0); continue
-        for slot in it:
-            if len(slot) == 2 and slot[0] == 0xF4 and ch in nf:
-                held.append(slot); continue
-            codes[ch] = slot; break
+    nf = set(no_risky)
+    safe  = [x for x in slots if not (len(x) == 2 and x[0] in RISKY_PREFIX)]
+    risky = [x for x in slots if       len(x) == 2 and x[0] in RISKY_PREFIX]
+
+    # 뒤에 남은 no_risky 음절 수를 미리 세어 안전 슬롯을 그만큼 남겨 둔다.
+    # 남겨 두지 않으면 희귀한 표 음절이 배정을 못 받는다 — 단어표 [07] 「에놋」
+    # 의 「놋」 이 그렇게 걸렸다. 빈도순으로 안전 슬롯이 먼저 소진되고, 뒤에 온
+    # 「놋」 은 남은 5D/D5 를 전부 건너뛰다가 빈손이 됐다.
+    remain = [0] * (len(ordered) + 1)
+    for i in range(len(ordered) - 1, -1, -1):
+        remain[i] = remain[i + 1] + (1 if ordered[i] in nf else 0)
+
+    si = ri = 0
+    for i, ch in enumerate(ordered):
+        if ch in nf or len(safe) - si > remain[i + 1]:
+            if si >= len(safe):
+                raise SystemExit(f"안전 슬롯 부족: 메뉴·표 음절 {len(nf)}자 > "
+                                 f"{len(safe)}칸. 표에 쓰는 어휘를 줄여야 합니다.")
+            codes[ch] = safe[si]; si += 1
+        else:
+            if ri >= len(risky):
+                raise SystemExit(f"슬롯 부족: 고유 음절 {len(ordered)}자.")
+            codes[ch] = risky[ri]; ri += 1
     n1 = sum(freq[c] for c, s in codes.items() if len(s) == 1)
     n2 = sum(freq[c] for c, s in codes.items() if len(s) == 2)
     stats = {"unique": len(ordered), "capacity": capacity(),

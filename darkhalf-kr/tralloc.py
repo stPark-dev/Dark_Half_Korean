@@ -32,7 +32,7 @@ def _syl_and_fixed(text, tbl):
             except KeyError: fixed += 1
     return syl, fixed
 
-def allocate(pairs, tbl, extra=(), force=(), no_f4=()):
+def allocate(pairs, tbl, extra=(), force=(), no_risky=()):
     """pairs: [(용량바이트, 번역문)]. 반환: krcodec.allocate 와 동일.
 
     extra 는 예산 제약이 없는 문자열들(단어표 등)이다. 음절 인벤토리에는
@@ -50,7 +50,7 @@ def allocate(pairs, tbl, extra=(), force=(), no_f4=()):
     n = max(1, int(len(scored) * TIGHT_FRACTION))
     priority = [t for _, t in scored[:n]]
     return krcodec.allocate(texts, tbl, priority=priority, force=force,
-                            no_f4=no_f4)
+                            no_risky=no_risky)
 
 def tightest(pairs, tbl, n=10):
     """진단용: 음절당 예산이 가장 나쁜 세그먼트"""
