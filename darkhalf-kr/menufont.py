@@ -52,6 +52,7 @@ def render(ch, size=SIZE, thr=THR, shadow=True):
     획은 **1px** 이다. 처음에 색 5(그림자색)로 2px 획을 그렸더니 화면에서
     아무것도 안 보였다 (PROGRESS 4.17.9).
     """
+    if ch == " ": return [[0]*16 for _ in range(16)]   # 빈 칸
     im = Image.new("L", (16, 16), 0)
     d = ImageDraw.Draw(im)
     f = ImageFont.truetype(FONT, size)
