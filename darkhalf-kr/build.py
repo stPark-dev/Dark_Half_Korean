@@ -111,10 +111,20 @@ def plan(orig, rows, t):
     #
     #   이야기 대사 780개 / 그 밖 286개
     #   합집합 고유 음절 494자 / 메뉴 안전 슬롯 651칸 (여유 157칸)
-    def is_story(txt):
+    # 이름표가 소유한 구간은 **내용과 무관하게 메뉴 텍스트**다.
+    #
+    # 장비 이름 「홀리<EE>よ<F2>」 가 `<F2>` 때문에 이야기 대사로 분류돼
+    # 메뉴 안전 제약에서 빠졌다. 거기서 `<F2>` 는 초상화가 아니라 <EE> 뒤에
+    # 붙는 제어 바이트다. 그 결과 「홀」 이 `5d 43` (엔진 패치 전용 프리픽스)
+    # 을 받았고, 그 이름을 그리는 아이템 창이 깨졌다 (PROGRESS 4.30).
+    import trbatch
+    OWNED = trbatch.table_owned()
+
+    def is_story(addr, txt):
+        if any(lo <= addr < hi for lo, hi in OWNED): return False
         return "<FB>" in txt or "<F2>" in txt or txt.lstrip().startswith("「")
 
-    menu_txt = ([txt for _, txt in dlg_addr if not is_story(txt)]
+    menu_txt = ([txt for ad, txt in dlg_addr if not is_story(ad, txt)]
                 + [txt for _, _, txt in desc_items]
                 + list(words.texts()) + list(nametbl.texts())
                 + list(patch_opt.texts()))

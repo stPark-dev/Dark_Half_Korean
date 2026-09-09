@@ -250,6 +250,29 @@ def main(orig_p, new_p, tsv):
           + (f" {ffbad}" if ffbad else ""))
     fail += len(ffbad)
 
+    # [14] 이름표 구간에 위험 프리픽스(F4·5D·D5)가 없는지.
+    #
+    # 이 프리픽스는 패치한 대사·옵션 렌더러만 안다. 메뉴·목록 렌더러는
+    # 모른다. 장비 이름 「홀리<EE>よ<F2>」 가 `<F2>` 때문에 이야기 대사로
+    # 오분류돼 「홀」 이 5d 43 을 받았고 아이템 창이 깨졌다 (PROGRESS 4.30).
+    import trbatch as _tb
+    OWNED = _tb.table_owned()
+    rvbad = []
+    for c in rows:
+        if len(c) < 9 or not c[8].strip(): continue
+        ad, L = int(c[2], 16), int(c[3])
+        if L == 0 or not any(lo <= ad < hi for lo, hi in OWNED): continue
+        b = new[ad:ad+L]; i = 0
+        while i < len(b):
+            if b[i] in (0xF4, 0x5D, 0xD5) and i+1 < len(b) and bytes(b[i:i+2]) in {
+                    bytes(v) for v in codes.values()}:
+                rvbad.append((c[0], f"{b[i]:02x}{b[i+1]:02x}")); i += 2; continue
+            if b[i] in (0xF5, 0xF6, 0xF7): i += 2; continue
+            i += 1
+    print(f"[14] 이름표 구간 위험 프리픽스: {len(rvbad)}건"
+          + (f" {rvbad[:5]}" if rvbad else ""))
+    fail += len(rvbad)
+
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0
 
