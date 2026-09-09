@@ -327,6 +327,20 @@ def main(orig_p, new_p, tsv):
           + (f" {asbad[:4]}" if asbad else ""))
     fail += len(asbad)
 
+    # [17] 「바이트 하나 = 타일 하나」로 그려지는 음절이 창 장식 칸에 앉지
+    # 않았는가. 반각 폰트에는 한자가 없어서 단일바이트 한자 코드 31개의 8x8
+    # 칸은 창 테두리·모서리 장식이다. 거기에 한글을 쓰면 창 귀퉁이에 글자가
+    # 나오고(0xDE·0xDF 가 「당」「전」을 받아 「당전」이 떴다), 쓰지 않으면
+    # 그 코드를 받은 음절이 목록에서 장식으로 나온다. 그래서 force 음절은
+    # 그 코드를 받아선 안 된다 (allocate 가 풀 맨 뒤로 밀어 둔다).
+    ui = krcodec.hw_ui()
+    force = _b.plan(orig, rows, tbl)[3]
+    uibad = sorted(ch for ch in force
+                   if len(codes.get(ch, b'\0\0')) == 1 and codes[ch][0] in ui)
+    print(f"[17] 장식칸에 앉은 목록·필드 음절: {len(uibad)}자"
+          + (f" {''.join(uibad)}" if uibad else ""))
+    fail += len(uibad)
+
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0
 

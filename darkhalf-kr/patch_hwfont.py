@@ -148,8 +148,18 @@ def put(buf, k, g):
 
 
 def single_codes(codes):
-    """단일바이트로 배정된 {코드: 음절}."""
-    return {c[0]: ch for ch, c in codes.items() if len(c) == 1}
+    """이 폰트에 한글을 써도 되는 {코드: 음절}.
+
+    단일바이트 한자 코드 31개는 **8x8 칸이 창 장식 그래픽**이라 건드리면
+    창 귀퉁이에 글자가 나온다 (krcodec.hw_ui 주석, image/확인.png).
+    대사 폰트(16x16)에서는 정상 글리프 자리라 회수 자체는 그대로 두고,
+    이 폰트에서만 뺀다. allocate 가 그 코드를 풀 맨 뒤로 밀어 두므로
+    목록·필드에 실리는 음절은 여기 오지 않는다.
+    """
+    import krcodec
+    ui = krcodec.hw_ui()
+    return {c[0]: ch for ch, c in codes.items()
+            if len(c) == 1 and c[0] not in ui}
 
 
 def block_cap(rom, addr):
@@ -171,13 +181,21 @@ def apply(rom, codes, verbose=False):
         addr = bl[bi]
         cap = block_cap(rom, addr)
         buf = bytearray(gfx.unpack(bytes(rom), addr))
-        n = 0
+        n = sum(1 for c in single if lo <= c < lo + SPAN)
+        # 쓸 한글이 없으면 손대지 않는다. 블록0(코드 0x00~0x3F)이 그렇다 —
+        # 0x20~0x3F 는 전부 KEEP(공백·숫자·괄호·＋) 아니면 창 장식이다.
+        # 재압축만 해도 3바이트를 넘긴다 (745 > 742). 우리 packer 가 원본보다
+        # 나쁜 블록이 있다는 뜻이고, 건드릴 이유가 없으면 두는 것이 맞다.
+        if n == 0:
+            if verbose:
+                print(f"  {addr:#08x} 코드 {lo:#02x}~{lo+SPAN-1:#02x}  한글 없음 — 원본 유지")
+            continue
         blk = None
         for kind in BG_KINDS:
-            b2 = bytearray(buf); n = 0
+            b2 = bytearray(buf)
             for code, ch in single.items():
                 if lo <= code < lo + SPAN:
-                    put(b2, code - lo, render(ch, kind)); n += 1
+                    put(b2, code - lo, render(ch, kind))
             cand = gfx.block(bytes(b2))
             if len(cand) <= cap: blk = cand; used = kind; break
         if blk is None:
@@ -195,6 +213,15 @@ def verify(new, orig, codes):
     single = single_codes(codes)
     bl = [b for b in gfx.blocks(bytes(orig), ENTRY) if b]
     bad = []
+    # 창 장식 칸은 원본 그대로여야 한다.
+    import krcodec
+    for bi, lo in GROUPS:
+        nb, ob = gfx.unpack(bytes(new), bl[bi]), gfx.unpack(bytes(orig), bl[bi])
+        for code in krcodec.hw_ui():
+            if not (lo <= code < lo + SPAN): continue
+            k = code - lo
+            if bytes(nb[k*16:(k+1)*16]) != bytes(ob[k*16:(k+1)*16]):
+                bad.append((f"블록{bi}", f"{code:#02x}", "장식칸 덮음"))
     for bi, lo in GROUPS:
         buf = gfx.unpack(bytes(new), bl[bi])
         for code, ch in single.items():

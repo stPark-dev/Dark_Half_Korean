@@ -45,6 +45,17 @@ def main(rom_path):
     # F4 57칸을 뺀 값. 필요량은 약 836자다 (trcheck 외삽).
     # ＋(0x2B) 는 장비 강화 표시다. 회수하면 「소검＋１」 이 「소검하１」 이 된다.
     check("＋(0x2B) 는 회수 대상이 아니다", 0x2B not in krcodec.reclaimable())
+    # 반각 폰트에는 한자가 없다 — 단일바이트 한자 코드의 8x8 칸은 창 장식이다.
+    # 회수는 그대로 두고(대사 폰트에서는 정상 글리프 자리다) allocate 가 풀
+    # 맨 뒤로 밀어 목록·필드 음절이 걸리지 않게 한다.
+    ui = krcodec.hw_ui()
+    check("장식칸 31개 식별 (0xDE 中·0xDF 物 포함)",
+          len([c for c in krcodec.reclaimable() if c in ui]) == 31
+          and 0xDE in ui and 0xDF in ui and 0x60 in ui,
+          f"{len([c for c in krcodec.reclaimable() if c in ui])}")
+    _s = [c for c in krcodec.reclaimable()]
+    _pool = ([c for c in _s if c not in ui] + [c for c in _s if c in ui])
+    check("장식칸은 단일바이트 풀 맨 뒤 31칸", all(c in ui for c in _pool[-31:]))
     check("전면 번역 수용량 1252자 (UI한자 4칸·＋ 제외)",
           krcodec.capacity() == 1256 - len(krcodec.UI_KANJI), f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"

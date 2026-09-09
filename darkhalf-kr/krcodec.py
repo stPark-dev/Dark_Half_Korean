@@ -93,6 +93,53 @@ _NO_FF = lambda xs: [i for i in xs if i != 0xFF]
 # 글자의 코드를 되짚어 여기에 넣는다.
 UI_KANJI = {(0xF5, c) for c in range(0x4D, 0x51)}
 
+# 반각 폰트에는 한자가 없다 — 그 자리는 창 장식 그래픽이다.
+#
+# 목록 창은 8x8 반각 폰트(압축 그래픽 엔트리 0)를 쓴다. 반각에 한자를 넣을
+# 수는 없으니, **단일바이트 한자 코드 31개의 8x8 칸은 다른 그림**이다.
+# 원본 시트를 보면 창 테두리 레일(0x5B~0x65)·모서리 장식·게이지다.
+#
+# 타일맵으로 확인했다 (item2 덤프, 문자 베이스 0x200).
+#
+#   행14  0x229 0x22a 0x22b 0x22c    = 코드 29 2A 2B 2C   4x2 모서리 장식
+#   행15  0x239 0x23a 0x23b 0x23c    = 코드 39 3A 3B 3C
+#   행18  0x22f 0x22e 0x22d          = 코드 2F 2E 2D      3x2 (좌우 반전)
+#   행19  0x23f 0x23e 0x23d          = 코드 3F 3E 3D
+#
+# 여기에 한글을 쓰면 창 귀퉁이에 글자가 나온다 — 0xDE(中)·0xDF(物) 이
+# 「당」「전」을 받아 대화창 모서리에 「당전」이 떴다 (image/확인.png).
+#
+# 그런데 **대사 폰트(16x16)에서는 이 코드가 정상 글리프 자리**다. 그래서
+# 회수 자체를 막을 필요는 없다. 나누면 된다.
+#
+#   대사에만 나오는 음절  -> 이 코드를 줘도 된다 (16x16 만 덮는다)
+#   목록·필드에 나오는 음절 -> 주면 안 된다 (8x8 이 장식이라 못 덮는다)
+#
+# 그래서 (1) patch_hwfont 는 이 코드의 8x8 칸을 건드리지 않고,
+# (2) allocate 는 단일바이트 풀에서 이 코드를 **맨 뒤로** 밀어 force 음절이
+# 걸리지 않게 한다. force 는 「바이트 하나 = 타일 하나로 그려지는 자리」의
+# 음절 집합이므로 그것만 피하면 된다.
+def _hw_ui():
+    """8x8 칸이 글자가 아닌 단일바이트 코드. 원문이 한자인 코드가 그것이다."""
+    import os as _os, re as _re
+    from dump import load_tbl
+    tbl = load_tbl(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                 "darkhalf.tbl"))
+    txt = _re.compile(r'[ぁ-んァ-ヶー・０-９Ａ-Ｚ0-9A-Z！？（）．。「」、‥ 　♥★←→]')
+    out = set()
+    for c in range(0x20, 0xE0):
+        ch = tbl.get(bytes([c])) or tbl.get(c)
+        if ch and not txt.match(ch): out.add(c)
+    return out
+
+HW_UI = None      # 첫 사용 때 채운다 (dump 를 import 하면 순환이 된다)
+
+
+def hw_ui():
+    global HW_UI
+    if HW_UI is None: HW_UI = _hw_ui()
+    return HW_UI
+
 def _no_ui(bank, idxs):
     return [i for i in idxs if (bank, i) not in UI_KANJI]
 
@@ -192,7 +239,11 @@ def allocate(texts, base_table, priority=(), force=(), no_risky=(),
             if kind == "ch" and is_hangul(v): pri.add(v)
     fs = set(force)
     ordered = sorted(freq, key=lambda c: (c not in fs, c not in pri, -freq[c]))
-    single = reclaimable()
+    # 8x8 칸이 창 장식인 코드는 단일바이트 풀의 **맨 뒤**로 민다. ordered 는
+    # force 가 앞이므로, 목록·필드에 실리는 음절은 이 코드를 받지 않는다.
+    _ui = hw_ui()
+    single = ([c for c in reclaimable() if c not in _ui]
+              + [c for c in reclaimable() if c in _ui])
     if len(ordered) > capacity():
         raise SystemExit(f"고유 음절 {len(ordered)}자 > 수용량 {capacity()}자. "
                          f"어휘를 줄여 고유 음절 수를 낮춰야 합니다 "
