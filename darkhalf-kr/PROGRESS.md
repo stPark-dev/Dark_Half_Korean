@@ -183,7 +183,7 @@ ROM `0x308000`~`0x30FFFF`) 도 **코드 변경 없이** 쓸 수 있다. 프리�
 목적지 1236개 -> 텍스트 런 991개
 ```
 
-런 분류 (`ptrmap.json`에 전체 기록):
+런 분류 (전체 기록은 `ptrmap.py <rom>` 으로 재생성한다):
 
 | 분류 | 개수 | 바이트 | 의미 |
 |---|---|---|---|
@@ -761,7 +761,7 @@ Mesen `Debug -> Memory Tools -> Video RAM -> File -> Export`.
 | `fontscan.py` | 폰트 타일 탐색 (획 연결성 기준) |
 | `survey.py` | 텍스트 구간 조사 (2단계: 지표 후보 → 디코딩 확정) |
 | `scanptr.py` `findptr.py` | 포인터 테이블 탐색 |
-| `ptrmap.py` | 포인터↔런 매핑, 런 분류 → `ptrmap.json` |
+| `ptrmap.py` | 포인터↔런 매핑, 런 분류. 결과 json 은 추적하지 않는다 (재생성) |
 | `dumpfont.py` | 폰트 → PNG 시트 |
 | `kanjiid.py` | 한자 글리프 시각 템플릿 매칭 (앙상블). `selftest` 로 정확도 측정 |
 | `kanjictx.py` | 한자 코드별 출현 문맥 수집 (판독의 결정적 근거) |
