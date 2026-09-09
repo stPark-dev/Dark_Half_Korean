@@ -21,8 +21,9 @@ darkhalf-kr/wram_write*.txt
 # vram.bin / cgram.bin 은 의도적으로 추적합니다.
 # 미해결 문제 4.1(메뉴 폰트)의 유일한 실증 자료이며 수동 덤프라 재생성이 어렵습니다.
 
-# 삽입 시 나오는 빌드 산물 (음절->코드 배정표)
+# 삽입 시 나오는 빌드 산물 (음절->코드 배정표, 설정 화면 쌍둥이 글리프)
 *.sfc.codes.json
+*.sfc.twins.json
 
 # script_ending.tsv 는 추적합니다. ending.py 로 뼈대는 재생성되지만
 # translation 열은 번역 결과물이라 재생성이 불가능합니다.
