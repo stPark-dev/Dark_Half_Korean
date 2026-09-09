@@ -51,7 +51,10 @@ def scan(texts_by_id, tbl):
         for m in _REF.finditer(t):
             b = int(m.group(1), 16) if m.group(1) else g2c.get(m.group(2))
             if b is None: continue
-            k = b - 1
+            # <EB>N -> WORDS[N]. 엔트리 0(ルキュ)을 표에 넣기 전에는 [N-1]
+            # 이었다. words.tag() 와 규칙이 어긋나면 조사 검사가 다른 단어를
+            # 보고 78건씩 오검출한다.
+            k = b
             if not (0 <= k < words.COUNT): continue
             kr = words.WORDS[k][1]
             if not kr: continue
