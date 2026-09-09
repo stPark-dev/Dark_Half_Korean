@@ -44,6 +44,10 @@ os.environ.pop("DH_KEEP_KANA", None)
 
 TBL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl")
 
+# 아이템·장비·마법 이름표가 있는 구간. 목록 창이 바이트 하나를 타일 하나로
+# 그리는 곳이라, 여기 음절은 전부 단일바이트여야 한다 (PROGRESS 4.34·4.37).
+LIST_TBL = (0x04f1c0, 0x04f470)
+
 
 def load_tsv(tsv):
     rows = []
@@ -78,7 +82,7 @@ def plan(orig, rows, t):
 
     # 표 항목이 원본 칸에 안 들어가면, 그 항목의 음절만 절대 우선으로 돌려
     # 다시 배정한다. 실패가 없어질 때까지 반복하므로 필요한 최소만 강제한다.
-    # 표 전체 음절은 129자인데 단일바이트 칸이 142 뿐이라, 전부 강제하면
+    # 표 전체 음절은 129자인데 단일바이트 칸이 141 뿐이라, 전부 강제하면
     # 대사 쪽에 남는 칸이 13개가 되어 예산이 무너진다.
     #
     # 엔딩은 이 반복에 넣지 않는다. 넣었더니 대사 예산 초과가 2개에서 72개로
@@ -144,11 +148,24 @@ def plan(orig, rows, t):
     # 원문 바이트 수를 맞추면 칸 수도 맞는다.
     import re as _re
     FIELD = _re.compile(r'<ED>出(.*?)<ED>')
+    # 필드는 세그먼트 경계를 넘는다. #59 의 마지막 <ED>出 이 연 필드의 본문이
+    # #60 의 선두 「소울 사용  」 이다. 선두를 빼먹으면 그 칸만 이스케이프가
+    # 섞여 깨진다 (「울」이 밀려 2바이트가 되자 칸이 하나 넘쳤다).
+    # 선두가 필드인지는 첫 <ED> 태그로 가른다 — <ED>出 로 열리면 그 앞은
+    # 질문문이고(#1 「괜찮습니까？」), <ED>界 로 닫히면 앞 세그먼트가 연 필드다.
+    LEAD = _re.compile(r'(.*?)<ED>(出?)')
+
+    def _fields(txt):
+        out = FIELD.findall(txt)
+        if '<ED>出' not in txt: return out
+        m = LEAD.match(txt)
+        if m and m.group(2) != '出': out.append(m.group(1))
+        return out
     # 설정 화면은 칸 수를 정확히 맞춰야 해서 이스케이프 개수까지 지정된다.
     # 줄이는 수단은 단일바이트 승격뿐이다 (patch_opt.FORCE 주석 참조).
     force = {"호"} | patch_opt.FORCE
     for _, txt in dlg_addr:
-        for f in FIELD.findall(txt):
+        for f in _fields(txt):
             for kind, v in krcodec.parse(f):
                 if kind == "ch" and krcodec.is_hangul(v): force.add(v)
 
@@ -157,21 +174,29 @@ def plan(orig, rows, t):
     # (PROGRESS 4.34). 이스케이프를 해석하지 않으므로 목록에 뜨는 이름의
     # 음절은 전부 단일바이트여야 한다. 아니면 이름이 깨지고 화면이 붕괴한다.
     #
-    # 대가가 크다. 단일바이트 칸이 142 뿐이라 이름에 쓰는 만큼 대사에서 빠진다.
+    # 대가가 크다. 단일바이트 칸이 141 뿐이라 이름에 쓰는 만큼 대사에서 빠진다.
     # 범위별로 재 보면 (대사 초과 세그먼트 / 총 초과 바이트)
     #
     #   강제 없음  28자   11개 /  13B
-    #   마법만     66자   55개 /  76B     <- 지금 여기
+    #   마법만     66자   55개 /  76B
     #   장비만     79자   74개 / 113B
     #   둘 다     101자  189개 / 503B
     #
-    # 마법 이름부터 한다. 실기에서 붕괴가 확인된 화면이 마법 목록이고,
-    # 평균 1.4바이트/건이라 문구로 흡수할 수 있다. 장비는 그다음이다.
+    # 마법 이름을 먼저 했다 (한자어화로 초과를 90 -> 35 로 줄였다). 장비도
+    # 같은 방법으로 음역을 한국어·한자어로 바꿔 강제 음절을 32 -> 21 자로
+    # 줄이고 나서 넣었다 (PROGRESS 4.37).
     for _sp, _wl in nametbl.TABLES:
         for _ja, _kr in _wl:
             if not _kr: continue
             for kind, v in krcodec.parse(_kr):
                 if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+    # 아이템·장비 이름표(0x04f1c0~0x04f470)도 같은 목록 창에 실린다.
+    # 이 문자열은 nametbl 이 아니라 TSV 가 정본이라 주소로 골라야 한다.
+    # 「상태」「대형」 같은 메뉴 라벨도 이 구간에 있고 같은 창에서 그려진다.
+    for _ad, _txt in dlg_addr:
+        if not (LIST_TBL[0] <= _ad < LIST_TBL[1]): continue
+        for kind, v in krcodec.parse(_txt):
+            if kind == "ch" and krcodec.is_hangul(v): force.add(v)
     for _ in range(8):
         codes, freq, st = tralloc.allocate(pairs, t, force=force, no_risky=no_risky,
                                            reserve_safe=patch_opt.TWIN_RESERVE)

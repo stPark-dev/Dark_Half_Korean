@@ -38,15 +38,17 @@ def main(rom_path):
 
     print("[2] 수용량")
     os.environ.pop("DH_KEEP_KANA", None)
-    # 142 = 0x20~0xDF 에서 KEEP·제어·프리픽스를 뺀 수.
+    # 141 = 0x20~0xDF 에서 KEEP·제어·프리픽스를 뺀 수.
     # 143 이었다가 0xA0(♥) 을 KEEP 으로 옮겨 하나 줄었다. ♥ 는 본문 문장부호가
     # 아니라 UI 표시 글리프여서 회수하면 아이템 창이 깨진다 (krcodec.KEEP 주석).
-    check("단일바이트 회수 142개 (프리픽스 $5D/$D5, ♥ 제외)", len(krcodec.reclaimable()) == 142, f"{len(krcodec.reclaimable())}")
+    check("단일바이트 회수 141개 (프리픽스 $5D/$D5, ♥, ＋ 제외)", len(krcodec.reclaimable()) == 141, f"{len(krcodec.reclaimable())}")
     # F4 57칸을 뺀 값. 필요량은 약 836자다 (trcheck 외삽).
-    check("전면 번역 수용량 1253자 (UI한자 4칸 제외)",
-          krcodec.capacity() == 1257 - len(krcodec.UI_KANJI), f"{krcodec.capacity()}")
+    # ＋(0x2B) 는 장비 강화 표시다. 회수하면 「소검＋１」 이 「소검하１」 이 된다.
+    check("＋(0x2B) 는 회수 대상이 아니다", 0x2B not in krcodec.reclaimable())
+    check("전면 번역 수용량 1252자 (UI한자 4칸·＋ 제외)",
+          krcodec.capacity() == 1256 - len(krcodec.UI_KANJI), f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"
-    check("가나 보존 시 단일바이트 32개", len(krcodec.reclaimable()) == 32, f"{len(krcodec.reclaimable())}")
+    check("가나 보존 시 단일바이트 31개", len(krcodec.reclaimable()) == 31, f"{len(krcodec.reclaimable())}")
     os.environ.pop("DH_KEEP_KANA", None)
 
     print("[3] 글리프 기록 주소 — 뱅크별로 올바른 폰트 영역에 써야 한다")

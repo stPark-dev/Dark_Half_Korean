@@ -247,9 +247,18 @@ def report(tsv, worst=12):
     # 「일본어가 남았다」로 보이는 것이 실은 인자인 경우가 있다. 그래서
     # 개수(제어 코드 불일치)만 보는 검사로는 안 잡힌다 — 원본과 번역에서
     # <EE> 다음 토큰이 **같아야** 한다.
+    #
+    # 예외 — 이름표 구간(0x04f1c0~0x04f470)에서 <EE> 뒤 두 바이트는 **포인터**다
+    # (꼬리 점프. 그 엔트리는 0xFF 종료자가 아예 없고 <EE> 가 끝을 표시한다).
+    # 공유 접미어의 위치가 바뀌면 이 값도 같이 바뀌어야 맞는다. 예를 들어
+    # 「ソード」가 0x04f1c4 였는데 「검」이 0x04f1c1 로 옮겨졌다.
+    # 이 구간의 옳고 그름은 verify_insert [16] 이 조립기를 흉내 내어 본다.
     EEP = re.compile(r'<EE>(<[0-9A-Fa-f]{2}>|<[A-Fa-f][0-9A-Fa-f]{2}>|<[魔士見入]>|.)')
+    TBL_PTR = (0x04f1c0, 0x04f470)
+    addr = {int(c[0]): int(c[2], 16) for c in rows if len(c) > 2}
     eep = []
     for i, cap, t in done:
+        if TBL_PTR[0] <= addr.get(i, 0) < TBL_PTR[1]: continue
         a, b = EEP.findall(orig_txt.get(i, "")), EEP.findall(t)
         if a != b: eep.append((i, a, b))
     if eep:

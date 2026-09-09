@@ -281,6 +281,52 @@ def main(orig_p, new_p, tsv):
           f"불일치 {len(hwbad)}개" + (f" {hwbad[:3]}" if hwbad else ""))
     fail += len(hwbad)
 
+    # [16] 아이템·장비·마법 이름을 **조립기가 보는 대로** 확인한다.
+    #
+    # 목록 창은 조립된 바이트 하나를 타일 하나로 그린다. 그러니 조립 결과에
+    # 이스케이프 프리픽스(F4~F7·5D·D5)가 하나라도 있으면 그 이름은 깨진다.
+    # 조립 규칙은 세 가지다.
+    #
+    #   EE lo hi     ptr 로 꼬리 점프한다 (여기서 이 엔트리는 끝난다)
+    #   F0 C4 lo hi  ptr 의 문자열을 넣고 계속 읽는다 (「＋１」 변형)
+    #   0xFF         끝
+    #
+    # <EE> 를 지우면 안 된다. 열한 엔트리는 **0xFF 종료자가 아예 없고**
+    # <EE> 가 끝을 표시한다 (0x04f1de 등). 리터럴로 풀어 쓰자 남는 칸을 지나
+    # 다음 엔트리로 흘러 들어가 자기 자신을 다시 참조했다.
+    ITEM_PTR, N_ITEM = 0x040260, 0x62
+    PFX = (0xF4, 0xF5, 0xF6, 0xF7, 0x5D, 0xD5)
+
+    # <EB>N 은 단어표 참조다. 마법표 [0x11] 이 <EB><17> 로 되어 있어서
+    # 「다크게이트」가 목록에 그대로 실린다 — 그 음절도 단일바이트여야 한다.
+    import words as _w
+    _wslot = _w.slots(new)
+
+    def _asm(rom, a, depth=0):
+        out = []
+        if depth > 6: return out + [0xF4]      # 순환 -> 프리픽스로 표시해 실패시킴
+        while True:
+            b = rom[a]
+            if b == 0xFF: return out
+            if b == 0xEE:
+                return out + _asm(rom, 0x040000 | rom[a+1] | (rom[a+2] << 8), depth+1)
+            if b == 0xF0 and rom[a+1] == 0xC4:
+                out += _asm(rom, 0x040000 | rom[a+2] | (rom[a+3] << 8), depth+1)
+                a += 4; continue
+            if b == 0xEB and rom[a+1] < _w.COUNT:
+                out += _asm(rom, _wslot[rom[a+1]][0], depth+1); a += 2; continue
+            out.append(b); a += 1
+    asbad = []
+    for i in range(N_ITEM):
+        a = 0x040000 | (new[ITEM_PTR+i*2] | (new[ITEM_PTR+i*2+1] << 8))
+        got, want = _asm(new, a), _asm(orig, a)
+        if not want: continue                  # 원본이 빈 엔트리면 견줄 것이 없다
+        if any(b in PFX for b in got) or not got:
+            asbad.append((f"{i:02X}", bytes(got[:12]).hex()))
+    print(f"[16] 이름표 조립 {N_ITEM}엔트리: 이스케이프 섞인 이름 {len(asbad)}개"
+          + (f" {asbad[:4]}" if asbad else ""))
+    fail += len(asbad)
+
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0
 
