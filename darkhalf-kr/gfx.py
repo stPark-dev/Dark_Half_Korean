@@ -61,8 +61,16 @@ def blocks(rom, entry):
     # 첫 오프셋이 목록 길이를 알려준다. 64개를 무조건 읽으면 뒤쪽은 블록
     # 데이터를 오프셋으로 오해해 엉뚱한 주소가 섞인다 (칸 계산이 523 으로
     # 나와 제자리 삽입이 막혔다).
-    first = rom[base] | (rom[base+1] << 8)
-    n = first // 2
+    # 첫 항목이 0xFFFF(빈 블록)일 수 있다. 엔트리 18·28 이 그렇고, 그때
+    # first//2 를 쓰면 32767 이 나와 블록 데이터를 오프셋으로 오해한다
+    # (오프닝 텍스트를 못 찾던 이유였다). 처음 나오는 실제 오프셋을 쓴다 —
+    # 목록이 표 바로 뒤에서 시작하므로 그 값이 목록 길이 × 2 다.
+    n = 0
+    for k in range(64):
+        v = rom[base + k*2] | (rom[base + k*2 + 1] << 8)
+        if v != 0xFFFF:
+            n = v // 2; break
+    if not n: return []
     out = []
     for k in range(n):
         o = rom[base + k*2] | (rom[base + k*2 + 1] << 8)
