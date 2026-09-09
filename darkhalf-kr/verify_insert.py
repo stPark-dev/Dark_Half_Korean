@@ -118,7 +118,9 @@ def main(orig_p, new_p, tsv):
 
     # 메뉴 폰트 블록 (4bpp 압축). 다시 압축하면 길이가 줄어서 블록 안쪽만
     # 바뀌지만, 어디까지 바뀔지는 블록 한도까지다.
-    import patch_menu
+    import patch_menu, opening
+    # 오프닝: 스크립트 구간과 엔트리 18 의 텍스트 블록들
+    OPEN_R = opening.written_range(orig)
     MENU_R = []
     for a in {addr for addr, _, _ in patch_menu.GLYPHS}:
         cap = patch_menu.block_limit(orig, a)
@@ -132,7 +134,8 @@ def main(orig_p, new_p, tsv):
            and not any(a <= i < b for a, b in NAME_R)
            and not (0xFFDC <= i <= 0xFFDF)
            and not any(a <= i < b for a, b in ENGINE_R)
-           and not any(a <= i < b for a, b in MENU_R)]
+           and not any(a <= i < b for a, b in MENU_R)
+           and not any(a <= i < b for a, b in OPEN_R)]
     print(f"[5] 허용 영역 밖 변경 {len(out)}바이트"); fail += len(out)
 
     # 포인터를 실제로 따라가 되읽는다. 포인터와 문자열이 함께 옳아야 통과한다.
@@ -225,6 +228,11 @@ def main(orig_p, new_p, tsv):
     print(f"[11] 메뉴 폰트 글리프 {len(patch_menu.GLYPHS)}개: 불일치 {len(mbad)}개"
           + (f" {mbad[:3]}" if mbad else ""))
     fail += len(mbad)
+
+    opbad = opening.verify(new, orig)
+    print(f"[12] 오프닝 {len(opening.KR)}줄 + 글리프: 불일치 {len(opbad)}개"
+          + (f" {opbad[:3]}" if opbad else ""))
+    fail += len(opbad)
 
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0

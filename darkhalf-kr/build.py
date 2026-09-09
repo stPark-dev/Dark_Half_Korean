@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import krcodec, tralloc, words, patch_words, nametbl, patch_names, patch_ending, pipeline
 import patch_opt
 import patch_menu
+import opening
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -224,6 +225,9 @@ def main(src, tsv, dst, engine=True):
     # 메뉴 폰트(4bpp 압축)는 대사 폰트와 별개 렌더러다. gfx.py 로 풀고 다시
     # 압축해 제자리에 넣는다 (PROGRESS 4.17).
     rom = bytearray(patch_menu.apply(rom, verbose=True))
+    # 오프닝 컷신은 스프라이트다. 글리프는 엔트리 18(압축 그래픽),
+    # 문장은 (타일, OAM 속성) 스크립트다 (PROGRESS 4.18).
+    rom = bytearray(opening.apply(rom, verbose=True))
     if oover:
         print(f"!! 설정 화면 초과/불가 {len(oover)}개")
         for a, kr, n, cap in oover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")
