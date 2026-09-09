@@ -21,14 +21,37 @@
 import sys, os
 from PIL import Image, ImageDraw, ImageFont
 
-FONT = "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"
+FONT = "/usr/share/fonts/malgun.ttf"     # 1px 획이 깔끔하게 나온다
 SIZE = 14
 THR = 110
-BODY = 5          # 원본 본체 색
+
+# 원본은 획 색으로 4·7·9·13 을 디더링해 중간색을 만든다 (削 의 긴 직선 획이
+# 4,9,9,4,9,7,d 처럼 섞여 있다). 흉내내면 원본에 가깝지만 **자리에 안 들어간다** —
+# 색이 섞이면 압축이 나빠져 블록이 787바이트가 되고 칸은 786뿐이다.
+#
+#   4색 디더+그림자   787  초과 1
+#   2색(9,7)+그림자   795  초과 9
+#   단색 9+그림자     770  가능   <- 이걸 쓴다
+#   단색 9, 그림자 없음 749  가능
+#
+# 그래서 단색으로 간다. 9 는 원본 획에서 가장 많이 쓰이는 색(削 30px)이라
+# 확실히 보이는 색이다. 원본보다 평평해 보이지만 읽힌다.
+DITHER = (9,)
+SHADOW = 5      # 우하단 1px 그림자. 배경과 가까운 색이라 획에 쓰면 안 보인다
 
 
-def render(ch, size=SIZE, thr=THR):
-    """문자 -> 16x16 색번호 배열 (0 = 배경)."""
+def render(ch, size=SIZE, thr=THR, shadow=True):
+    """문자 -> 16x16 색번호 배열.
+
+    ## 원본의 그리기 규칙 (削·規 를 색별로 분해해 확인)
+
+        ..#######o.      # = 획 (4/7/9/13 디더)
+        ..#ooooo#o.      o = 색 5, 획의 우하단 1px 그림자
+        ..#o....#o.      . = 색 0, 투명
+
+    획은 **1px** 이다. 처음에 색 5(그림자색)로 2px 획을 그렸더니 화면에서
+    아무것도 안 보였다 (PROGRESS 4.17.9).
+    """
     im = Image.new("L", (16, 16), 0)
     d = ImageDraw.Draw(im)
     f = ImageFont.truetype(FONT, size)
@@ -36,7 +59,17 @@ def render(ch, size=SIZE, thr=THR):
     d.text(((16-(bb[2]-bb[0]))//2 - bb[0], (16-(bb[3]-bb[1]))//2 - bb[1]),
            ch, fill=255, font=f)
     p = im.load()
-    return [[BODY if p[x, y] >= thr else 0 for x in range(16)] for y in range(16)]
+    ink = [[p[x, y] >= thr for x in range(16)] for y in range(16)]
+    g = [[0]*16 for _ in range(16)]
+    if shadow:
+        for y in range(16):
+            for x in range(16):
+                if ink[y][x] and y+1 < 16 and x+1 < 16 and not ink[y+1][x+1]:
+                    g[y+1][x+1] = SHADOW
+    for y in range(16):
+        for x in range(16):
+            if ink[y][x]: g[y][x] = DITHER[(x*5 + y*3) % len(DITHER)]
+    return g
 
 
 def put(buf, t0, g):
