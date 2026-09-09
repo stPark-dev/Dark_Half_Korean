@@ -237,6 +237,26 @@ def report(tsv, worst=12):
         for i, lo, gi, t in ctlbad[:worst]:
             print(f"   #{i}: 잃음={lo} 얻음={gi}  {t[:44]}")
 
+    # [12] <EE> 다음 토큰은 제어 파라미터다 — 바꾸면 안 된다.
+    #
+    # 워프 목록 19개(#1078~#1096)가 전부 `<EE> c6 e0` 로 끝난다. 추출기는
+    # c6 을 「に」로 읽지만 **텍스트가 아니라 <EE> 의 인자**다. 그중 5개를
+    # 「에」로 번역했더니 그 항목만 「마왕 정상G모습이다」처럼 깨졌다
+    # (image/오류.png). 나머지 14개는 「に」를 그대로 둬서 정상이었다.
+    #
+    # 「일본어가 남았다」로 보이는 것이 실은 인자인 경우가 있다. 그래서
+    # 개수(제어 코드 불일치)만 보는 검사로는 안 잡힌다 — 원본과 번역에서
+    # <EE> 다음 토큰이 **같아야** 한다.
+    EEP = re.compile(r'<EE>(<[0-9A-Fa-f]{2}>|<[A-Fa-f][0-9A-Fa-f]{2}>|<[魔士見入]>|.)')
+    eep = []
+    for i, cap, t in done:
+        a, b = EEP.findall(orig_txt.get(i, "")), EEP.findall(t)
+        if a != b: eep.append((i, a, b))
+    if eep:
+        print(f"\n!! <EE> 파라미터 변경 {len(eep)}건 (제어 코드 인자다)")
+        for i, a, b in eep[:worst]:
+            print(f"   #{i}: 원본 {a} -> 번역 {b}")
+
     # [10] 선택 항목(<ED>出 … <ED> )은 단일바이트 음절만 써야 한다.
     #
     # 이 필드는 바이트 하나를 타일 하나로 그린다. 이스케이프를 넣으면 두
@@ -314,10 +334,10 @@ def report(tsv, worst=12):
         for i, n, cap, t in over[:worst]:
             print(f"   #{i}: {n}바이트 필요 / {cap} 가능 (초과 {n-cap})  {t[:44]}")
     if not (over or bad or leftover or orphan or jbad or longbad or embed
-            or invade or ctlbad or chbad or eover):
+            or invade or ctlbad or chbad or eover or eep):
         print(f"\n검사 통과 — 예산 초과 0, 인코딩 불가 0, 일본어 잔존 0,"
               f" 고아 프리픽스 0, 조사 불일치 0, 장음 0, 한글속한자 0, 표침범 0,"
-              f" 제어 코드 불일치 0, 선택항목 0, 엔딩 0")
+              f" 제어 코드 불일치 0, 선택항목 0, 엔딩 0, <EE>파라미터 0")
 
     # 최종 인벤토리 외삽 — 상한 753자를 넘길지 진행 중에 알아야 한다.
     # Heaps 법칙 V = K*N^b. 번역이 진행될수록 b 가 내려가므로 추정은 보수적이다.
