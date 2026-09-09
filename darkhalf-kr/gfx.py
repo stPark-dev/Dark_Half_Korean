@@ -171,6 +171,35 @@ if __name__ == "__main__":
 
 # ---------- 재인코딩 ----------
 
+def _copy_table():
+    """복사 명령($C03414)이 닿는 오프셋 y -> {c2: 그것을 만드는 바이트 b}.
+
+    y 는 128개뿐이고 **코덱이 쓰는 열 시작 위치와 정확히 같다**
+    (base+{0,1,0x10,0x11}, base 는 0x20 배수). 그래서 앞서 나온 어느 열이든
+    역참조할 수 있다.
+
+    c2 는 디코더의 BCS 분기다. c2==1 이면 복사만 하고 끝나므로 1바이트,
+    c2==0 이면 뒤에 마스크 1바이트가 따라온다.
+    """
+    t = {}
+    for b in range(256):
+        v = b & 0xFC
+        a1 = (v << 1) & 0xFF
+        c1 = (v >> 7) & 1
+        a2 = ((a1 << 1) | c1) & 0xFF
+        c2 = (a1 >> 7) & 1
+        y = (((b & 3) << 8) | a2) & 0x3FF
+        t.setdefault(y, {}).setdefault(c2, b)
+    return t
+
+
+COPY = _copy_table()
+
+# 열이 배출되는 순서. 복사는 **이미 배출된** 열만 참조할 수 있다.
+ORDER = [base + d for base in range(0, BUFLEN, 0x20) for d in (0, 1, 0x10, 0x11)]
+ORDER_IX = {x: i for i, x in enumerate(ORDER)}
+
+
 def pack(buf):
     """1024바이트 버퍼 -> (비트 스트림, 데이터 스트림).
 
@@ -185,8 +214,9 @@ def pack(buf):
         0,1  채움    8바이트가 전부 0x00 또는 0xFF 일 때 (폰트는 빈칸이 많다)
         1,1  리터럴8 그 밖
 
-    복사·니블 역인터리브는 쓰지 않는다. 둘 다 원본 대비 크기를 줄여 주지만
-    인코더를 복잡하게 만들고, 잘못 쓰면 조용히 깨진다.
+    니블 역인터리브와 **복사**도 쓴다. 복사를 빼 두었더니 원본을 그대로 다시
+    압축해도 칸을 넘었다 (반각 폰트 블록0: 896 > 742). 반각 폰트에 한글을
+    넣으려면 반드시 필요하다 (PROGRESS 4.35).
     """
     bits, data = [], bytearray()
 
@@ -196,7 +226,7 @@ def pack(buf):
         c = Counter(col)
         # 전부 같고 0x00/0xFF -> 채움 (0바이트)
         if len(c) == 1 and col[0] in (0x00, 0xFF):
-            return (0, 1), [1 if col[0] == 0x00 else 0], b""
+            return (0, 1), [1 if col[0] == 0x00 else 0], b"", 0
         # 마스크 + 채움. 채움값을 비트로 줄 수 있으면(0x00/0xFF) 1바이트 아낀다
         best = None
         for f, n in c.items():
@@ -228,14 +258,40 @@ def pack(buf):
             if best is None or cost < best[3]:
                 best = ((0, 0), [1 if f == 0x00 else 0],
                         bytes([m]) + bytes(keep), cost)
-        if best[3] < 8: return best[0], best[1], best[2]
-        return (1, 1), [0], bytes(col)                      # 리터럴 8개
+        if best[3] < 8: return best[0], best[1], best[2], best[3]
+        return (1, 1), [0], bytes(col), 8                   # 리터럴 8개
+
+    def copy_plan(x, col):
+        """이 열을 앞서 나온 열의 복사로 표현할 수 있으면 (명령, 비트, 바이트, 비용).
+
+        정확히 일치하면 1바이트(c2==1), 다르면 1 + 마스크 1 + 다른 바이트 수다.
+        복사는 비트 스트림을 쓰지 않는다.
+        """
+        xi = ORDER_IX[x]
+        best = None
+        for y, bys in COPY.items():
+            if ORDER_IX.get(y, 1 << 30) >= xi: continue     # 아직 안 나온 열
+            src = [buf[(y + k*2) & (BUFLEN - 1)] for k in range(8)]
+            diff = [k for k in range(8) if src[k] != col[k]]
+            if not diff and 1 in bys:
+                return (1, 0), [], bytes([bys[1]]), 1
+            if 0 not in bys: continue
+            m = 0
+            for k in range(8): m = (m << 1) | (1 if k in diff else 0)
+            cost = 2 + len(diff)
+            if best is None or cost < best[3]:
+                best = ((1, 0), [], bytes([bys[0], m]) + bytes(col[k] for k in diff), cost)
+        return best
 
     base = 0
     while base < BUFLEN:
         cmdbits, chunk = [], bytearray()
         for x in (base, base + 1, base + 0x10, base + 0x11):
-            cb, bb, by = col_plan([buf[x + k*2] for k in range(8)])
+            col = [buf[x + k*2] for k in range(8)]
+            cb, bb, by, cost = col_plan(col)
+            cp = copy_plan(x, col)
+            if cp is not None and cp[3] < cost:
+                cb, bb, by = cp[0], cp[1], cp[2]
             cmdbits += list(cb); bits += bb; chunk += by
         cmd = 0
         for b in cmdbits: cmd = (cmd << 1) | b
