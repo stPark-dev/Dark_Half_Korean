@@ -234,6 +234,22 @@ def main(orig_p, new_p, tsv):
           + (f" {opbad[:3]}" if opbad else ""))
     fail += len(opbad)
 
+    # [13] 표에 연속 0xFF 가 생기지 않았는지.
+    #
+    # 남는 칸을 0xFF 로 채웠더니 마법표에 31쌍, 단어표에 67쌍의 연속 0xFF 가
+    # 생겼다. 원본에는 그 자리에 한 쌍도 없다. 표를 0xFF 구분자로 순차 주사하는
+    # 루틴이 그것을 빈 엔트리로 읽어 인덱스가 밀리고, 끝내 표를 넘어 뒤쪽
+    # 0xFF 채움 구간까지 읽어 화면 전체가 붕괴했다 (PROGRESS 4.29).
+    def ffpairs(v, lo, hi):
+        return sum(1 for i in range(lo, hi - 1) if v[i] == 0xFF and v[i+1] == 0xFF)
+    TBL_R = [(0x4f1c0, 0x4f3d3, "장비 이름표"), (0x4f3d3, 0x4f45c, "마법 이름표"),
+             (0x4f672, 0x4f8aa, "몬스터 이름표"), (0x5c116, 0x5c263, "단어표")]
+    ffbad = [(tag, ffpairs(orig, lo, hi), ffpairs(new, lo, hi))
+             for lo, hi, tag in TBL_R if ffpairs(new, lo, hi) != ffpairs(orig, lo, hi)]
+    print(f"[13] 표 연속 0xFF: 원본과 다른 표 {len(ffbad)}개"
+          + (f" {ffbad}" if ffbad else ""))
+    fail += len(ffbad)
+
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0
 

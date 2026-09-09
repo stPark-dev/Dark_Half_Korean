@@ -27,10 +27,20 @@ def apply(rom, codes, tbl, verbose=False):
         if len(b) > cap:
             over.append((k, kr, len(b), cap)); continue
         rom[addr:addr+len(b)] = b
-        rom[addr+len(b)] = 0xFF
-        # 남는 칸은 0xFF 로 채운다. 종료자 뒤라 표시에 영향이 없고,
-        # 옛 일본어 바이트가 남아 다른 참조에 읽히는 일을 막는다.
-        for a in range(addr+len(b)+1, addr+cap+1): rom[a] = 0xFF
+        # 남는 칸은 **공백(0x20)** 으로 채우고 종료자는 **원래 자리**에 둔다.
+        #
+        # 한때 남는 칸을 전부 0xFF 로 채웠다. 「종료자 뒤라 표시에 영향이
+        # 없다」 고 봤는데 틀렸다. 원본 표에는 연속 0xFF 가 **한 쌍도 없다.**
+        # 0xFF 로 채우면 마법표에 31쌍, 단어표에 67쌍이 생기고, 표를 0xFF
+        # 구분자로 **순차 주사**하는 루틴이 그것을 빈 엔트리로 읽는다. 그러면
+        # 인덱스가 밀려 목록에 엉뚱한 이름이 나오고(image/깨짐.png), 끝내 표를
+        # 넘어 뒤쪽 0xFF 채움 구간까지 읽어 **화면 전체가 붕괴한다**
+        # (image/깨짐2.png — broken.dmp 에 0xFF 연속 9,886바이트가 찍혔다).
+        #
+        # 공백으로 채우면 엔트리마다 0xFF 가 정확히 하나, 원본과 같은 자리에
+        # 남는다. 포인터로 읽어도 뒤에 공백만 붙고, 순차로 훑어도 경계가 같다.
+        for a in range(addr+len(b), addr+cap): rom[a] = 0x20
+        rom[addr+cap] = 0xFF
     if verbose and not over:
         print(f"단어표: {sum(1 for _, kr in words.WORDS if kr)}엔트리 제자리 삽입 "
               f"(포인터 표 {words.PTR_TABLE:#08x} 무변경)")
@@ -42,11 +52,15 @@ def verify(rom, orig, codes, tbl):
     bad = []
     for k, ((addr, cap), (ja, kr)) in enumerate(zip(words.slots(orig), words.WORDS)):
         if kr is None: continue
-        j = addr
-        while rom[j] != 0xFF: j += 1
-        got = bytes(rom[addr:j])
+        # apply 가 쓰는 배치를 그대로 대조한다 — 한국어 + 공백 채움 + 0xFF.
+        #
+        # rstrip(b'\x20') 으로 뒤 공백을 떼는 방식은 쓰면 안 된다. 이스케이프의
+        # **인덱스 바이트가 0x20 일 수 있어서** 글자를 잘라 먹는다 (「국왕」
+        # 「마왕」 이 그렇게 6건 오검출됐다).
         want = krcodec.encode(kr, codes, tbl)
-        if got != want: bad.append(("단어표", k, kr, got.hex(), want.hex()))
+        exp = want + bytes([0x20]) * (cap - len(want)) + bytes([0xFF])
+        got = bytes(rom[addr:addr+cap+1])
+        if got != exp: bad.append(("단어표", k, kr, got.hex(), exp.hex()))
     n = 2 * words.COUNT
     if bytes(rom[words.PTR_TABLE:words.PTR_TABLE+n]) != bytes(orig[words.PTR_TABLE:words.PTR_TABLE+n]):
         bad.append(("단어표", -1, "포인터 표가 바뀌었다", "", ""))
