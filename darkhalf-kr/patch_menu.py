@@ -22,9 +22,22 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gfx, menufont
 
 # (블록 주소, 타일, 글자). 타일은 블록 안 번호이고 n,n+1,n+16,n+17 을 쓴다.
+#
+# 자리를 찾는 방법: VRAM 덤프를 템플릿 매칭해 글자의 VRAM 타일 번호를 얻고,
+#
+#     VRAM 타일 = 576 + 32*(블록순번 - 7) + 블록내타일
+#
+# 로 역산한다 (블록순번은 엔트리[22]를 주소순으로 정렬한 것). 0x16aa16 이
+# VRAM 576 이라는 것은 실기 VRAM 과 1024/1024 일치로 확정했다 (4.17.6).
+#
 # 세이브 선택 화면 — 원문 「新規」「削除」「設定」
 GLYPHS = [
-    (0x16aa16, 10, "규"),      # 規 -> 규
+    (0x16a6d5, 10, "신"),      # 新
+    (0x16aa16, 10, "규"),      # 規
+    (0x16ad27,  0, "삭"),      # 削
+    (0x16ad27,  2, "제"),      # 除
+    (0x16b9dc, 10, "설"),      # 設
+    (0x16b9dc, 12, "정"),      # 定
 ]
 
 
@@ -40,17 +53,25 @@ def block_limit(rom, addr):
 
 
 def apply(rom, items=None, verbose=False):
+    """블록별로 묶어 한 번만 풀고 쓴다. 같은 블록에 두 글자가 들어가는 경우가
+    있어서(削·除 는 0x16ad27, 設·定 은 0x16b9dc) 항목마다 다시 풀면 앞의
+    수정이 날아간다."""
     rom = bytearray(rom)
+    byblk = {}
     for addr, tile, ch in (items or GLYPHS):
+        byblk.setdefault(addr, []).append((tile, ch))
+    for addr, lst in byblk.items():
         cap = block_limit(bytes(rom), addr)
         buf = bytearray(gfx.unpack(bytes(rom), addr))
-        menufont.put(buf, tile, menufont.render(ch))
+        for tile, ch in lst:
+            menufont.put(buf, tile, menufont.render(ch))
         blk = gfx.block(bytes(buf))
         if cap is not None and len(blk) > cap:
-            raise SystemExit(f"{addr:#08x} 「{ch}」: {len(blk)}바이트 > 칸 {cap}")
+            raise SystemExit(f"{addr:#08x} {[c for _, c in lst]}: "
+                             f"{len(blk)}바이트 > 칸 {cap}")
         rom[addr-1:addr-1+len(blk)] = blk
         if verbose:
-            print(f"  {addr:#08x} 타일 {tile} <- 「{ch}」  {len(blk)}/{cap}바이트")
+            print(f"  {addr:#08x} {[(t, c) for t, c in lst]}  {len(blk)}/{cap}바이트")
     return bytes(rom)
 
 
