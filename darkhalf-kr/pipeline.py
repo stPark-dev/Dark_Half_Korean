@@ -178,10 +178,14 @@ FONT_BASE = {None: 0x2F0000, 0xF4: 0x2F0000,
              0xF5: 0x2F4000, 0xF6: 0x2F8000, 0xF7: 0x2FC000,
              0x5D: 0x300000, 0xD5: 0x304000}
 
-def patch_font(rom, codes):
-    """배정된 음절의 글리프를 폰트 영역에 기록"""
+def patch_font(rom, codes, extra=()):
+    """배정된 음절의 글리프를 폰트 영역에 기록.
+
+    extra 는 (음절, 슬롯) 쌍의 추가 목록이다. 같은 음절을 두 슬롯에 넣어야
+    하는 경우가 있어서(설정 화면 칸 맞춤용 쌍둥이) dict 로는 못 받는다.
+    """
     from makefont import encode as enc_glyph
-    for ch, slot in codes.items():
+    for ch, slot in list(codes.items()) + list(extra):
         if len(slot) == 1:
             a = FONT_BASE[None] + slot[0]*64
         else:

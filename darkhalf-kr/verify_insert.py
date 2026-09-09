@@ -28,6 +28,8 @@ def main(orig_p, new_p, tsv):
     orig = open(orig_p, 'rb').read(); new = open(new_p, 'rb').read()
     codes = {k: bytes.fromhex(v) for k, v in
              json.load(open(new_p + ".codes.json", encoding='utf-8')).items()}
+    twins = {k: bytes.fromhex(v) for k, v in
+             json.load(open(new_p + ".twins.json", encoding='utf-8')).items()}
     tbl = load_tbl(TBL)
     rows = [l.rstrip('\n').split('\t')
             for l in open(tsv, encoding='utf-8').readlines()[1:]]
@@ -69,7 +71,9 @@ def main(orig_p, new_p, tsv):
     def in_ending(a):
         return any(lo <= a < hi or lo < a+64 <= hi for lo, hi in ewr)
 
-    want_addr = {slot_addr(s) for s in codes.values()}
+    # 쌍둥이 슬롯도 글리프가 쓰인 자리다 (설정 화면 칸 맞춤용).
+    want_addr = ({slot_addr(s) for s in codes.values()}
+                 | {slot_addr(s) for s in twins.values()})
     # 엔진 패치를 켜면 인덱스 1024~ 가 뱅크 $F0 = ROM 0x300000 에 놓인다.
     # 롬이 4MB 로 늘어나므로 그 구간까지 훑어야 한다 (PROGRESS 1.2.2).
     hi_end = min(len(orig), len(new))
@@ -84,7 +88,7 @@ def main(orig_p, new_p, tsv):
         extra = sorted(changed - want_addr)[:5]
         if extra: print(f"    배정 밖 변경: {[hex(x) for x in extra]}")
 
-    mis = [ch for ch, s in codes.items()
+    mis = [ch for ch, s in list(codes.items()) + list(twins.items())
            if new[slot_addr(s):slot_addr(s)+64] != makefont.encode(ch)]
     print(f"[4] 글리프 내용 일치: 불일치 {len(mis)}개 {mis[:8]}"); fail += len(mis)
 
@@ -204,7 +208,7 @@ def main(orig_p, new_p, tsv):
           + (f" {f4bad[:4]}" if f4bad else ""))
     fail += len(f4bad)
 
-    obad = patch_opt.verify(new, orig, codes, tbl)
+    obad = patch_opt.verify(new, orig, codes, tbl, list(twins.values()))
     print(f"[10] 설정 화면 제자리: 불일치 {len(obad)}개"
           + (f" {obad[:3]}" if obad else ""))
     fail += len(obad)

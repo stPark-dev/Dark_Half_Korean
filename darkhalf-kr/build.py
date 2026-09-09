@@ -132,13 +132,16 @@ def plan(orig, rows, t):
     # 원문 바이트 수를 맞추면 칸 수도 맞는다.
     import re as _re
     FIELD = _re.compile(r'<ED>出(.*?)<ED>')
-    force = {"호"}
+    # 설정 화면은 칸 수를 정확히 맞춰야 해서 이스케이프 개수까지 지정된다.
+    # 줄이는 수단은 단일바이트 승격뿐이다 (patch_opt.FORCE 주석 참조).
+    force = {"호"} | patch_opt.FORCE
     for _, txt in dlg_addr:
         for f in FIELD.findall(txt):
             for kind, v in krcodec.parse(f):
                 if kind == "ch" and krcodec.is_hangul(v): force.add(v)
     for _ in range(8):
-        codes, freq, st = tralloc.allocate(pairs, t, force=force, no_risky=no_risky)
+        codes, freq, st = tralloc.allocate(pairs, t, force=force, no_risky=no_risky,
+                                           reserve_safe=patch_opt.TWIN_RESERVE)
         probe = bytearray(orig)
         miss = ([kr for _, kr, _, _ in patch_words.apply(probe, codes, t)]
                 + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)])
@@ -180,7 +183,9 @@ def main(src, tsv, dst, engine=True):
         print(f"엔진 패치 적용 (롬 {len(rom)}바이트)")
 
     # --- 2) 폰트 ---
-    pipeline.patch_font(rom, codes)
+    # 설정 화면 칸 맞춤용 쌍둥이 글리프 (같은 글자를 이스케이프 슬롯에도)
+    opt_twin = patch_opt.twins(codes, st['reserved_safe'])
+    pipeline.patch_font(rom, codes, extra=opt_twin.items())
 
     # --- 3) 각 구간 삽입. 전부 제자리(원본 길이)라 포인터를 건드리지 않는다 ---
     over = []
@@ -215,7 +220,7 @@ def main(src, tsv, dst, engine=True):
     wover = patch_words.apply(rom, codes, t, verbose=True)
     nover = patch_names.apply(rom, codes, t, verbose=True)
     eover = patch_ending.apply(rom, codes, t, verbose=True)
-    oover = patch_opt.apply(rom, codes, t, verbose=True)
+    oover = patch_opt.apply(rom, codes, t, st['reserved_safe'], verbose=True)
     # 메뉴 폰트(4bpp 압축)는 대사 폰트와 별개 렌더러다. gfx.py 로 풀고 다시
     # 압축해 제자리에 넣는다 (PROGRESS 4.17).
     rom = bytearray(patch_menu.apply(rom, verbose=True))
@@ -245,6 +250,9 @@ def main(src, tsv, dst, engine=True):
     import json
     json.dump({ch: sl.hex() for ch, sl in codes.items()},
               open(dst + ".codes.json", "w"), ensure_ascii=False, indent=1)
+    # 쌍둥이는 같은 음절이 두 슬롯을 쓰므로 codes 에 못 담는다. 따로 적는다.
+    json.dump({ch: sl.hex() for ch, sl in opt_twin.items()},
+              open(dst + ".twins.json", "w"), ensure_ascii=False, indent=1)
 
 
 if __name__ == "__main__":

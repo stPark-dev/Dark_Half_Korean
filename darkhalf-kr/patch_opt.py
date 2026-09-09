@@ -78,10 +78,110 @@ ITEMS = [
     (0x2ff723,  2, 1, "上",             "상"),
     (0x2ff725,  9, 7, "魔法エフェクト",   "마법 효과"),
     (0x2ff734,  5, 4, "サウンド",        "사운드"),
-    (0x2ff739,  4, 4, "ステレオ",        "입체"),     # 「스테레오」는 5바이트
+    (0x2ff739,  4, 4, "ステレオ",        "스테레오"),
     (0x2ff73d,  4, 4, "モノラル",        "모노"),
 ]
 # ＯＮ / ＯＦＦ / ＥＸＩＴ / ← → 는 그대로 둔다 (ASCII 와 화살표는 원본 글리프다)
+
+# 「스테레오」의 「테」와 「모노」의 「노」는 이스케이프가 0개여야 하는 칸에
+# 들어간다. 이스케이프를 줄이는 방법은 단일바이트 승격뿐이라 강제한다.
+FORCE = {"테", "노"}
+
+# 쌍둥이용으로 할당기에서 빼 둘 메뉴 안전 슬롯 수. 실제 필요분은 6이고
+# 문구를 고칠 여유로 2를 더 뒀다. 배정 결과를 보고서야 필요분을 알 수 있으므로
+# (단일바이트인지 이스케이프인지가 배정에 달렸다) 상수로 예약한다.
+TWIN_RESERVE = 8
+
+
+def orig_cells(rom, addr, nb):
+    """원본 바이트의 칸 수를 센다.
+
+    `nc` 를 손으로 적었다가 한 번 틀렸다. 「メッセージ速度」를 8칸으로 셌는데
+    7칸이었다 — `7c 01` 이 「シ + 탁음」이고 **탁음 바이트 0x01 은 칸을 늘리지
+    않는다**. 그래서 상수를 믿지 않고 원본에서 세어 대조한다.
+    """
+    n = i = 0
+    while i < nb:
+        v = rom[addr + i]
+        if v == 0x01: i += 1; continue          # 탁음 결합 — 칸 없음
+        i += 2 if v in (0xF4, 0xF5, 0xF6, 0xF7, 0x5D, 0xD5) else 1
+        n += 1
+    return n
+
+
+def check_nc(rom):
+    """표에 적은 nc 가 원본과 맞는지 확인한다."""
+    return [(hex(a), jp, nc, orig_cells(rom, a, nb))
+            for a, nb, nc, jp, _ in ITEMS if orig_cells(rom, a, nb) != nc]
+
+
+def _elen(ch, codes):
+    """이 음절의 바이트 수. 공백은 0x20 한 바이트다."""
+    return 1 if ch == " " else len(codes[ch])
+
+
+def plan_item(kr, nb, nc, codes):
+    """이 항목을 어떻게 인코딩할지 정한다.
+
+    반환: (승격할 문자 인덱스 목록, 남는 공백 수)
+    """
+    need = nb - nc                     # 원문의 이스케이프 개수
+    nat = sum(_elen(c, codes) - 1 for c in kr)
+    cand = [i for i, c in enumerate(kr) if c != " " and _elen(c, codes) == 1]
+    promote = need - nat
+    if promote < 0:
+        raise ValueError(f"「{kr}」 이스케이프 {nat}개 > 필요 {need}개 — 줄일 수 "
+                         f"없다. 단일바이트 음절로 다시 쓰거나 FORCE 에 넣어라")
+    if promote > len(cand):
+        raise ValueError(f"「{kr}」 이스케이프 {nat}개 -> {need}개 로 올려야 "
+                         f"하는데 올릴 수 있는 음절이 {len(cand)}개뿐이다")
+    idx = cand[:promote]
+    used = sum(_elen(c, codes) for c in kr) + promote
+    pad = nb - used
+    if pad < 0:
+        raise ValueError(f"「{kr}」 {used}/{nb}바이트")
+    if len(kr) + pad != nc:
+        raise ValueError(f"「{kr}」 칸 {len(kr)+pad} != {nc}")
+    return idx, pad
+
+
+def twin_syllables(codes):
+    """쌍둥이가 필요한 음절 (중복 없이, 나오는 순서)."""
+    out = []
+    for _, nb, nc, _, kr in ITEMS:
+        idx, _ = plan_item(kr, nb, nc, codes)
+        for i in idx:
+            if kr[i] not in out: out.append(kr[i])
+    return out
+
+
+def twins(codes, reserved):
+    """같은 글리프를 여분 이스케이프 슬롯에 하나 더 배정한다.
+
+    「우」·「하」·「상」 은 단일바이트라 1바이트 1칸이다. 그런데 원문 「右」는
+    2바이트 1칸이다. 칸을 맞추려면 **2바이트로 1칸**을 써야 하고, 그 방법은
+    같은 글자를 이스케이프 슬롯에도 하나 더 두는 것뿐이다. 대사는 계속 싼
+    단일바이트를 쓰고, 설정 화면만 쌍둥이를 쓴다.
+
+    메뉴 안전 슬롯만 쓴다. 설정 화면 렌더러가 5D/D5(엔진 패치가 추가)를 아는지
+    확인되지 않았고, 둘째 바이트가 0x20 미만이면 제어 코드로 읽힌다.
+    """
+    used = set(codes.values())
+    free = [s for s in reserved if s not in used and krcodec.menu_safe(s)]
+    need = twin_syllables(codes)
+    if len(need) > len(free):
+        raise ValueError(f"쌍둥이 {len(need)}개 필요, 여분 {len(free)}칸")
+    return {ch: free[k] for k, ch in enumerate(need)}
+
+
+def encode_item(kr, nb, nc, codes, twin):
+    idx, pad = plan_item(kr, nb, nc, codes)
+    out = bytearray()
+    for i, c in enumerate(kr):
+        if c == " ": out.append(0x20)
+        elif i in idx: out += twin[c]
+        else: out += codes[c]
+    return bytes(out) + bytes([0x20]) * pad
 
 
 def texts():
@@ -93,31 +193,27 @@ def pairs():
     return [(nb, kr) for _, nb, _, _, kr in ITEMS]
 
 
-def apply(rom, codes, tbl, verbose=False):
-    over = []
+def apply(rom, codes, tbl, reserved, verbose=False):
+    bad = check_nc(rom)
+    if bad: raise SystemExit(f"설정 화면 nc 값이 원본과 다르다: {bad}")
+    twin = twins(codes, reserved)
     for addr, nb, nc, jp, kr in ITEMS:
-        try:
-            b = krcodec.encode(kr, codes, tbl)
-        except KeyError as e:
-            over.append((addr, kr, str(e), nb)); continue
-        if len(b) > nb or len(kr) > nc:
-            over.append((addr, kr, len(b), nb)); continue
-        rom[addr:addr+nb] = b + bytes([0x20]) * (nb - len(b))
-    if verbose and not over:
-        print(f"설정 화면: {len(ITEMS)}항목 제자리 삽입 (0x2ff706~0x2ff740)")
-    return over
+        b = encode_item(kr, nb, nc, codes, twin)
+        assert len(b) == nb, (addr, kr, len(b), nb)
+        rom[addr:addr+nb] = b
+    if verbose:
+        print(f"설정 화면: {len(ITEMS)}항목 제자리 삽입 "
+              f"(0x2ff706~0x2ff740, 쌍둥이 글리프 {len(twin)}자)")
+    return []
 
 
-def verify(new, orig, codes, tbl):
-    bad = []
+def verify(new, orig, codes, tbl, reserved):
+    twin = twins(codes, reserved)
+    bad = [(a, jp, f"nc {nc} != 원본 {real}") for a, jp, nc, real in check_nc(orig)]
     for addr, nb, nc, jp, kr in ITEMS:
-        try:
-            b = krcodec.encode(kr, codes, tbl)
-        except KeyError:
-            bad.append((addr, kr, "인코딩 불가")); continue
-        want = b + bytes([0x20]) * (nb - len(b))
+        want = encode_item(kr, nb, nc, codes, twin)
         if bytes(new[addr:addr+nb]) != want:
-            bad.append((addr, kr, new[addr:addr+nb].hex()))
+            bad.append((hex(addr), kr, new[addr:addr+nb].hex()))
     return bad
 
 

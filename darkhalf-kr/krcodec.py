@@ -143,7 +143,8 @@ def parse(text):
 def is_hangul(ch):
     return 0xAC00 <= ord(ch) <= 0xD7A3
 
-def allocate(texts, base_table, priority=(), force=(), no_risky=()):
+def allocate(texts, base_table, priority=(), force=(), no_risky=(),
+             reserve_safe=0):
     """번역문들에서 음절 빈도를 세어 코드 배정.
     priority 에 든 문자열의 음절은 단일바이트를 먼저 받는다.
     (메뉴 라벨처럼 예산이 3~8바이트로 빡빡한 곳을 우선 보장)
@@ -153,6 +154,12 @@ def allocate(texts, base_table, priority=(), force=(), no_risky=()):
     쓴다. priority 만으로는 부족하다 — 우선 집합의 음절 수가 단일바이트
     칸(143)보다 많으면 그 안에서 다시 빈도순으로 밀리고, 표에 쓰는 음절은
     희귀해서 매번 밀린다.
+
+    reserve_safe 는 배정에서 빼 둘 메뉴 안전 슬롯 수다. 설정 화면이 칸을
+    맞추려면 「우」처럼 단일바이트인 음절을 **2바이트 1칸**으로도 써야 하는데
+    (원문 「右」가 2바이트 1칸이다), 그러려면 같은 글리프를 이스케이프 슬롯에
+    하나 더 둬야 한다. 안전 슬롯 651칸이 음절 804자에 전부 소진되므로 미리
+    빼 두지 않으면 남는 칸이 없다. 빠진 슬롯은 stats["reserved_safe"] 로 돈다.
 
     반환: {문자: bytes}, 빈도, 통계"""
     freq = {}
@@ -200,6 +207,15 @@ def allocate(texts, base_table, priority=(), force=(), no_risky=()):
     safe  = [x for x in slots if     menu_safe(x)]
     risky = [x for x in slots if not menu_safe(x)]
 
+    # 예약분은 뒤에서 뗀다. 안전 슬롯은 빈도순으로 앞에서 소진되므로 뒤쪽이
+    # 가장 늦게 쓰이는 칸이다 (단일바이트는 앞쪽이라 예약에 걸리지 않는다).
+    reserved = []
+    if reserve_safe:
+        if reserve_safe > len(safe):
+            raise SystemExit(f"예약 {reserve_safe}칸 > 안전 슬롯 {len(safe)}칸")
+        reserved = safe[len(safe)-reserve_safe:]
+        safe = safe[:len(safe)-reserve_safe]
+
     # 뒤에 남은 no_risky 음절 수를 미리 세어 안전 슬롯을 그만큼 남겨 둔다.
     # 남겨 두지 않으면 희귀한 표 음절이 배정을 못 받는다 — 단어표 [07] 「에놋」
     # 의 「놋」 이 그렇게 걸렸다. 빈도순으로 안전 슬롯이 먼저 소진되고, 뒤에 온
@@ -223,7 +239,8 @@ def allocate(texts, base_table, priority=(), force=(), no_risky=()):
     n2 = sum(freq[c] for c, s in codes.items() if len(s) == 2)
     stats = {"unique": len(ordered), "capacity": capacity(),
              "single_slots": len(single), "occ1": n1, "occ2": n2,
-             "avg_bytes": (n1 + 2*n2)/max(1, n1+n2)}
+             "avg_bytes": (n1 + 2*n2)/max(1, n1+n2),
+             "reserved_safe": reserved}
     return codes, freq, stats
 
 # 번역자가 ASCII 문장부호를 써도 게임 테이블의 전각 글자로 자동 변환
