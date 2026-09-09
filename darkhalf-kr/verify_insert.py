@@ -62,8 +62,10 @@ def main(orig_p, new_p, tsv):
 
     # 엔딩 텍스트는 폰트 영역 안(0x2FCFC0~0x2FF780)에 있다. 그 자리는 글리프가
     # 아니므로 폰트 슬롯 검사에서 제외한다 (PROGRESS 4.8).
-    import patch_ending
-    ewr = patch_ending.written_range()
+    import patch_ending, patch_opt
+    # 설정 화면 텍스트도 폰트 영역 안(F7 슬롯 0xDC~0xDD)에 있다. 글리프가
+    # 아니므로 폰트 슬롯 검사에서 제외한다 (PROGRESS 4.17.13).
+    ewr = patch_ending.written_range() + patch_opt.written_range()
     def in_ending(a):
         return any(lo <= a < hi or lo < a+64 <= hi for lo, hi in ewr)
 
@@ -110,6 +112,14 @@ def main(orig_p, new_p, tsv):
                 (0x00F200, 0x00F240), (0x00F260, 0x00F2A0),
                 (0x00F300, 0x00F360)]
 
+    # 메뉴 폰트 블록 (4bpp 압축). 다시 압축하면 길이가 줄어서 블록 안쪽만
+    # 바뀌지만, 어디까지 바뀔지는 블록 한도까지다.
+    import patch_menu
+    MENU_R = []
+    for a in {addr for addr, _, _ in patch_menu.GLYPHS}:
+        cap = patch_menu.block_limit(orig, a)
+        MENU_R.append((a - 1, a - 1 + (cap or 0)))
+
     out = [i for i in range(len(orig)) if orig[i] != new[i]
            and not (TEXT[0] <= i < TEXT[1]) and not (FONT[0] <= i < FONT[1])
            and not (WORD_PTR[0] <= i < WORD_PTR[1])
@@ -117,7 +127,8 @@ def main(orig_p, new_p, tsv):
            and not any(a <= i < b for a, b in DESC_R)
            and not any(a <= i < b for a, b in NAME_R)
            and not (0xFFDC <= i <= 0xFFDF)
-           and not any(a <= i < b for a, b in ENGINE_R)]
+           and not any(a <= i < b for a, b in ENGINE_R)
+           and not any(a <= i < b for a, b in MENU_R)]
     print(f"[5] 허용 영역 밖 변경 {len(out)}바이트"); fail += len(out)
 
     # 포인터를 실제로 따라가 되읽는다. 포인터와 문자열이 함께 옳아야 통과한다.
@@ -192,6 +203,24 @@ def main(orig_p, new_p, tsv):
     print(f"[9] 메뉴·표 영역 위험 이스케이프: {len(f4bad)}건"
           + (f" {f4bad[:4]}" if f4bad else ""))
     fail += len(f4bad)
+
+    obad = patch_opt.verify(new, orig, codes, tbl)
+    print(f"[10] 설정 화면 제자리: 불일치 {len(obad)}개"
+          + (f" {obad[:3]}" if obad else ""))
+    fail += len(obad)
+
+    # 메뉴 폰트는 압축이라 바이트 비교가 안 된다. 풀어서 타일을 비교한다.
+    import gfx, menufont
+    mbad = []
+    for addr, tile, ch in patch_menu.GLYPHS:
+        buf = bytearray(gfx.unpack(bytes(new), addr))
+        want = bytearray(0x400); menufont.put(want, tile, menufont.render(ch))
+        idx = [tile*32 + k for k in range(32)] + [(tile+16)*32 + k for k in range(32)]
+        if any(buf[i] != want[i] for i in idx if i < 0x400):
+            mbad.append((hex(addr), tile, ch))
+    print(f"[11] 메뉴 폰트 글리프 {len(patch_menu.GLYPHS)}개: 불일치 {len(mbad)}개"
+          + (f" {mbad[:3]}" if mbad else ""))
+    fail += len(mbad)
 
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0

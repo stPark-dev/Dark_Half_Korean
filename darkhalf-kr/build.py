@@ -26,6 +26,8 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import krcodec, tralloc, words, patch_words, nametbl, patch_names, patch_ending, pipeline
+import patch_opt
+import patch_menu
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -69,7 +71,8 @@ def plan(orig, rows, t):
     # 배정을 못 받아 2바이트 코드가 걸리고 칸을 넘긴다. 용량과 함께 pairs 로
     # 넘겨 우선 배정 대상에 들어가게 한다.
     pairs = (dlg + [(cap, txt) for _, cap, txt in desc_items]
-             + words.pairs(orig) + nametbl.pairs(orig) + patch_ending.pairs())
+             + words.pairs(orig) + nametbl.pairs(orig) + patch_ending.pairs()
+             + patch_opt.pairs())
 
     # 표 항목이 원본 칸에 안 들어가면, 그 항목의 음절만 절대 우선으로 돌려
     # 다시 배정한다. 실패가 없어질 때까지 반복하므로 필요한 최소만 강제한다.
@@ -112,7 +115,8 @@ def plan(orig, rows, t):
 
     menu_txt = ([txt for _, txt in dlg_addr if not is_story(txt)]
                 + [txt for _, _, txt in desc_items]
-                + list(words.texts()) + list(nametbl.texts()))
+                + list(words.texts()) + list(nametbl.texts())
+                + list(patch_opt.texts()))
     no_risky = set()
     for txt in menu_txt:
         for kind, v in krcodec.parse(txt):
@@ -211,6 +215,14 @@ def main(src, tsv, dst, engine=True):
     wover = patch_words.apply(rom, codes, t, verbose=True)
     nover = patch_names.apply(rom, codes, t, verbose=True)
     eover = patch_ending.apply(rom, codes, t, verbose=True)
+    oover = patch_opt.apply(rom, codes, t, verbose=True)
+    # 메뉴 폰트(4bpp 압축)는 대사 폰트와 별개 렌더러다. gfx.py 로 풀고 다시
+    # 압축해 제자리에 넣는다 (PROGRESS 4.17).
+    rom = bytearray(patch_menu.apply(rom, verbose=True))
+    if oover:
+        print(f"!! 설정 화면 초과/불가 {len(oover)}개")
+        for a, kr, n, cap in oover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")
+        raise SystemExit(1)
     if eover:
         print(f"!! 엔딩 조각 초과 {len(eover)}개 (제자리라 늘릴 수 없다)")
         for sid, kr, n, cap in eover[:12]:
