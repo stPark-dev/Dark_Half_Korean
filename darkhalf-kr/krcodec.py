@@ -76,8 +76,23 @@ _NO_FF = lambda xs: [i for i in xs if i != 0xFF]
 # 대신 엔진 패치의 5D/D5 를 쓴다. 수용량 1314 -> 1257 이고 필요량은 약 836 이다.
 # CTRL_KANJI_REV 의 F4 인코딩은 그대로 둔다 — 원본 한자를 되돌리는 경로이고,
 # 배정에서 빠졌으니 이제 그 글리프가 온전하다.
+# UI 가 **직접 그리는** 뱅크 한자. 회수하면 안 된다.
+#
+# 필드의 이동 방향 표시가 東西南北 을 뱅크 한자로 직접 그린다. 이름표나 대사를
+# 거치지 않으므로 no_risky·menu_safe 로는 막히지 않는다. 회수했더니 화면에
+# 「형 조 숨 예」 가 나왔다 (image/동서남북.png, PROGRESS 4.31).
+#
+#   F5 4D = 東   F5 4E = 西   F5 4F = 南   F5 50 = 北
+#
+# 같은 종류가 더 있을 수 있다. 화면에서 한자가 한글로 바뀐 것이 보이면 그
+# 글자의 코드를 되짚어 여기에 넣는다.
+UI_KANJI = {(0xF5, c) for c in range(0x4D, 0x51)}
+
+def _no_ui(bank, idxs):
+    return [i for i in idxs if (bank, i) not in UI_KANJI]
+
 BANK_SLOTS = {
-    0xF5: _NO_FF(range(0, 256)),
+    0xF5: _no_ui(0xF5, _NO_FF(range(0, 256))),
     0xF6: _NO_FF(range(0, 256)),
     0xF7: _NO_FF(list(range(0x00, 0x3E)) + list(range(0xDE, 0x100))),
     0x5D: _NO_FF(range(0, 256)),

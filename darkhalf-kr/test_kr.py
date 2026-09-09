@@ -19,7 +19,9 @@ def main(rom_path):
 
     print("[1] 뱅크 정의 — F7 은 0x3E 이후가 폰트 데이터가 아니다")
     banks = dict(krcodec.BANKS)
-    check("F5 뱅크 255슬롯 (0xFF 제외)", banks.get(0xF5) == 255, f"{banks.get(0xF5)}")
+    # F5 는 UI 가 직접 그리는 東西南北(4D~50)을 뺀다 (krcodec.UI_KANJI).
+    check("F5 뱅크 251슬롯 (0xFF·UI한자 제외)",
+          banks.get(0xF5) == 255 - len(krcodec.UI_KANJI), f"{banks.get(0xF5)}")
     check("F6 뱅크 255슬롯 (0xFF 제외)", banks.get(0xF6) == 255, f"{banks.get(0xF6)}")
     check("F7 뱅크 95슬롯 (0x00-0x3D + 0xDE-0xFE)", banks.get(0xF7) == 95, f"{banks.get(0xF7)}")
 
@@ -41,7 +43,8 @@ def main(rom_path):
     # 아니라 UI 표시 글리프여서 회수하면 아이템 창이 깨진다 (krcodec.KEEP 주석).
     check("단일바이트 회수 142개 (프리픽스 $5D/$D5, ♥ 제외)", len(krcodec.reclaimable()) == 142, f"{len(krcodec.reclaimable())}")
     # F4 57칸을 뺀 값. 필요량은 약 836자다 (trcheck 외삽).
-    check("전면 번역 수용량 1257자", krcodec.capacity() == 1257, f"{krcodec.capacity()}")
+    check("전면 번역 수용량 1253자 (UI한자 4칸 제외)",
+          krcodec.capacity() == 1257 - len(krcodec.UI_KANJI), f"{krcodec.capacity()}")
     os.environ["DH_KEEP_KANA"] = "1"
     check("가나 보존 시 단일바이트 32개", len(krcodec.reclaimable()) == 32, f"{len(krcodec.reclaimable())}")
     os.environ.pop("DH_KEEP_KANA", None)
