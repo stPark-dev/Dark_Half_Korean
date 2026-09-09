@@ -29,6 +29,7 @@ import krcodec, tralloc, words, patch_words, nametbl, patch_names, patch_ending,
 import patch_opt
 import patch_menu
 import opening
+import patch_hwfont
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -150,16 +151,41 @@ def plan(orig, rows, t):
         for f in FIELD.findall(txt):
             for kind, v in krcodec.parse(f):
                 if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+
+    # 목록 창(마법·아이템·장비)은 **바이트 하나를 타일 하나로** 그린다.
+    # 타일맵의 타일 번호가 대사 폰트의 단일바이트 코드와 그대로 같다
+    # (PROGRESS 4.34). 이스케이프를 해석하지 않으므로 목록에 뜨는 이름의
+    # 음절은 전부 단일바이트여야 한다. 아니면 이름이 깨지고 화면이 붕괴한다.
+    #
+    # 대가가 크다. 단일바이트 칸이 142 뿐이라 이름에 쓰는 만큼 대사에서 빠진다.
+    # 범위별로 재 보면 (대사 초과 세그먼트 / 총 초과 바이트)
+    #
+    #   강제 없음  28자   11개 /  13B
+    #   마법만     66자   55개 /  76B     <- 지금 여기
+    #   장비만     79자   74개 / 113B
+    #   둘 다     101자  189개 / 503B
+    #
+    # 마법 이름부터 한다. 실기에서 붕괴가 확인된 화면이 마법 목록이고,
+    # 평균 1.4바이트/건이라 문구로 흡수할 수 있다. 장비는 그다음이다.
+    for _sp, _wl in nametbl.TABLES:
+        for _ja, _kr in _wl:
+            if not _kr: continue
+            for kind, v in krcodec.parse(_kr):
+                if kind == "ch" and krcodec.is_hangul(v): force.add(v)
     for _ in range(8):
         codes, freq, st = tralloc.allocate(pairs, t, force=force, no_risky=no_risky,
                                            reserve_safe=patch_opt.TWIN_RESERVE)
         probe = bytearray(orig)
         miss = ([kr for _, kr, _, _ in patch_words.apply(probe, codes, t)]
                 + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)])
-        if not miss: break
+        # 설정 화면은 이스케이프 개수를 정확히 맞춰야 한다. 못 맞추는 항목의
+        # 음절만 강제한다 (전부 미리 강제하면 단일바이트 30칸이 묶인다).
+        optneed = patch_opt.needs_force(codes)
+        if not miss and not optneed: break
         for kr in miss:
             for kind, v in krcodec.parse(kr):
                 if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+        force |= optneed
     return codes, freq, st, force, desc_items, dlg
 
 
@@ -238,6 +264,10 @@ def main(src, tsv, dst, engine=True):
     # 오프닝 컷신은 스프라이트다. 글리프는 엔트리 18(압축 그래픽),
     # 문장은 (타일, OAM 속성) 스크립트다 (PROGRESS 4.18).
     rom = bytearray(opening.apply(rom, verbose=True))
+    # 목록 창(마법·아이템·장비)은 바이트 하나를 타일 하나로 그린다.
+    # 그 8x8 반각 폰트에도 같은 코드 자리에 한글을 넣어야 한다
+    # (PROGRESS 4.34~4.35).
+    rom = bytearray(patch_hwfont.apply(rom, codes, verbose=True))
     if oover:
         print(f"!! 설정 화면 초과/불가 {len(oover)}개")
         for a, kr, n, cap in oover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")
