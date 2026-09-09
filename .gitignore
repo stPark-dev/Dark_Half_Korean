@@ -27,3 +27,7 @@ darkhalf-kr/wram_write*.txt
 
 # script_ending.tsv 는 추적합니다. ending.py 로 뼈대는 재생성되지만
 # translation 열은 번역 결과물이라 재생성이 불가능합니다.
+
+# Claude Code 로컬 설정 (기계마다 다르다)
+settings.local.json
+.claude/settings.local.json
