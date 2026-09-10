@@ -160,10 +160,22 @@ def plan(orig, rows, t):
     # 선두가 필드인지는 첫 <ED> 태그로 가른다 — <ED>出 로 열리면 그 앞은
     # 질문문이고(#1 「괜찮습니까？」), <ED>界 로 닫히면 앞 세그먼트가 연 필드다.
     LEAD = _re.compile(r'(.*?)<ED>(出?)')
+    # 필드를 여는 것이 <ED>出 만은 아니다. 전투 명령 #59 의 첫 칸은
+    # 「<ED> <FD><09><12>공격하기」 로 **<ED>공백** 이 열고 <ED>界 가 닫는다.
+    # 그래서 「공격하기」가 강제에서 빠져 실기에서 두 글자가 깨졌다
+    # (image/전투화면-선택지깨짐.png).
+    #
+    # 닫는 쪽으로 잡는 것이 안전하다 — **<ED>界 로 닫히는 구간이 필드**다.
+    # <ED>界 는 칸 위치를 지정하는 명령이라 필드 끝에만 온다. 여는 쪽으로
+    # 잡으면 <ED> 가 본문에 섞인 이야기 대사(#717~#725)까지 딸려 온다.
+    TOKS = _re.compile(r'(<ED>(?:<[0-9A-Fa-f]{2}>|<[魔士見入]>|.))')
 
     def _fields(txt):
         out = FIELD.findall(txt)
         if '<ED>出' not in txt: return out
+        ps = TOKS.split(txt)
+        for i in range(1, len(ps), 2):
+            if i + 2 < len(ps) and ps[i+2] == '<ED>界': out.append(ps[i+1])
         m = LEAD.match(txt)
         if m and m.group(2) != '出': out.append(m.group(1))
         return out
