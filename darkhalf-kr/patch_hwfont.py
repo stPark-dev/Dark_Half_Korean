@@ -71,11 +71,14 @@ INK = 3
 
 # 배경 후보. 앞에서부터 시도해 칸에 들어가는 첫 것을 쓴다.
 #
-# 한때 「가로줄」(행마다 색 1·2 교대)을 먼저 뒀다. 원본 노이즈 디더에 가장
-# 가까우면서 칸에 들어가는 것이 그것뿐이었기 때문이다. 자모 조합으로 바꾸니
-# 「단색」도 넉넉히 들어가고(456/770), **가로줄이 한글의 가로획과 섞여**
-# 읽기를 방해한다는 것이 나란히 그려 보니 분명했다. 단색을 먼저 쓴다.
-BG_KINDS = ("단색", "가로줄")
+# **원본 노이즈**가 정답이다. 공백 글리프(0x20)는 KEEP 이라 우리가 안 건드리고
+# 창 바탕도 같은 타일로 깔리므로, 글자 배경이 다르면 글자 칸만 도드라진다.
+#
+# 한때 못 썼다 — TrueType 을 8px 로 래스터하던 시절에는 잉크가 많아 노이즈
+# 배경까지 얹으면 칸을 넘겼다(746 > 742). 그래서 「가로줄」로 근사했고, 그
+# 가로줄이 한글 가로획과 섞여 다시 「단색」으로 갔다. 자모 조합(4.42)으로
+# 잉크가 줄자 **원본 노이즈가 다시 들어간다** (670/688 · 670/770 · 751/810).
+BG_KINDS = ("원본", "단색", "가로줄")
 
 # 글리프는 **자모를 손으로 그려 조합한다** (hangul8.py).
 #
@@ -114,7 +117,13 @@ def orig_background(rom):
     return _bgcache
 
 
+_ORIG_BG = None
+
+
 def background(kind):
+    if kind == "원본":
+        if _ORIG_BG is None: raise ValueError("원본 배경은 apply 가 먼저 읽는다")
+        return _ORIG_BG.copy()
     g = np.zeros((8, 8), np.uint8)
     if kind == "가로줄":
         for r in range(8): g[r, :] = 1 if r % 2 == 0 else 2
@@ -173,7 +182,9 @@ def block_cap(rom, addr):
 
 
 def apply(rom, codes, verbose=False):
+    global _ORIG_BG
     rom = bytearray(rom)
+    _ORIG_BG = orig_background(rom)
     single = single_codes(codes)
     bl = [b for b in gfx.blocks(bytes(rom), ENTRY) if b]
     for bi, lo in GROUPS:
@@ -209,6 +220,8 @@ def apply(rom, codes, verbose=False):
 
 
 def verify(new, orig, codes):
+    global _ORIG_BG
+    _ORIG_BG = orig_background(orig)
     single = single_codes(codes)
     bl = [b for b in gfx.blocks(bytes(orig), ENTRY) if b]
     bad = []

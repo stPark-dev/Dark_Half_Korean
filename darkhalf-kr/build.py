@@ -32,6 +32,7 @@ import opening
 import patch_hwfont
 import cutscene
 import crytbl
+import montbl
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -89,7 +90,7 @@ def plan(orig, rows, t):
     # 넘겨 우선 배정 대상에 들어가게 한다.
     pairs = (dlg + [(cap, txt) for _, cap, txt in desc_items]
              + words.pairs(orig) + nametbl.pairs(orig) + patch_ending.pairs()
-             + patch_opt.pairs() + crytbl.pairs(orig))
+             + patch_opt.pairs() + crytbl.pairs(orig) + montbl.pairs(orig))
 
     # 표 항목이 원본 칸에 안 들어가면, 그 항목의 음절만 절대 우선으로 돌려
     # 다시 배정한다. 실패가 없어질 때까지 반복하므로 필요한 최소만 강제한다.
@@ -143,7 +144,8 @@ def plan(orig, rows, t):
     menu_txt = ([txt for ad, txt in dlg_addr if not is_story(ad, txt)]
                 + [txt for _, _, txt in desc_items]
                 + list(words.texts()) + list(nametbl.texts())
-                + list(patch_opt.texts()) + list(crytbl.texts()))
+                + list(patch_opt.texts()) + list(crytbl.texts())
+                + list(montbl.texts()))
     no_risky = set()
     for txt in menu_txt:
         for kind, v in krcodec.parse(txt):
@@ -240,6 +242,11 @@ def plan(orig, rows, t):
         if _n < len(_w.WORDS) and _w.WORDS[_n][1]:
             for _c in _w.WORDS[_n][1]:
                 if krcodec.is_hangul(_c): force.add(_c)
+    # 몬스터·화자 이름표도 타일 직접이다. 여기 쓰는 낱말은 이미 단일바이트인
+    # 음절로만 지어 놨으므로(montbl 주석) 강제해도 값이 들지 않는다.
+    for _kr in montbl.texts():
+        for kind, v in krcodec.parse(_kr):
+            if kind == "ch" and krcodec.is_hangul(v): force.add(v)
     # 전투 울음소리 표(0x05b39c)도 렌더러를 못 갈랐다. 어느 쪽이든 안전하게
     # 단일바이트로 못 박는다 — 의성어라 낱말 선택이 자유로워 값이 안 든다.
     for _kr in crytbl.texts():
@@ -352,6 +359,14 @@ def main(src, tsv, dst, engine=True):
         for a, kr, n, cap in cover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")
         raise SystemExit(1)
     print(f"울음소리: {len(crytbl.WORDS)}개 제자리 삽입")
+    # 몬스터·화자 이름표 (PROGRESS 4.44)
+    rom, mover = montbl.apply(rom, codes, t); rom = bytearray(rom)
+    if mover:
+        print(f"!! 이름표 초과 {len(mover)}개")
+        for a, kr, n, cap in mover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")
+        raise SystemExit(1)
+    print(f"몬스터·화자 이름표: {sum(1 for _, k in montbl.WORDS if k)}"
+          f"/{len(montbl.WORDS)}개 제자리 삽입")
     if oover:
         print(f"!! 설정 화면 초과/불가 {len(oover)}개")
         for a, kr, n, cap in oover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")

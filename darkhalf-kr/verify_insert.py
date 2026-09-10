@@ -50,8 +50,11 @@ def main(orig_p, new_p, tsv):
     # 이름표 문자열이 대사 뱅크 안에 있어 추출기가 대사 세그먼트로 잡는다
     # (마법 이름 0x04f3d3 = 세그먼트 #1295). 그 자리는 이름표가 정본이므로
     # '미번역 세그먼트 원본 보존' 검사에서 뺀다.
-    import nametbl
+    import nametbl, montbl as _mt, crytbl as _ct
     NAME_OWN = [(sp["data"], sp["limit"]) for sp, _ in nametbl.TABLES]
+    # 몬스터·화자 이름표(montbl)와 울음소리 표(crytbl)도 같은 이유로 뺀다 —
+    # 그 구간은 각자의 표가 정본이고 TSV 에는 번역이 없다.
+    NAME_OWN += [(_mt.LO, _mt.HI), (_ct.DATA, _ct.LIMIT)]
     def name_owned(a, n):
         return any(a < hi and a + n > lo for lo, hi in NAME_OWN)
 
@@ -118,14 +121,14 @@ def main(orig_p, new_p, tsv):
 
     # 메뉴 폰트 블록 (4bpp 압축). 다시 압축하면 길이가 줄어서 블록 안쪽만
     # 바뀌지만, 어디까지 바뀔지는 블록 한도까지다.
-    import patch_menu, opening, patch_hwfont, cutscene, crytbl
+    import patch_menu, opening, patch_hwfont, cutscene, crytbl, montbl
     # 오프닝: 스크립트 구간과 엔트리 18 의 텍스트 블록들
     OPEN_R = opening.written_range(orig)
     # 반각 폰트: 엔트리 0 의 블록 9개
     HW_R = patch_hwfont.written_range(orig)
     # 컷신: 타일맵 스트림과 엔트리 28 의 글꼴 블록 12개
     CUT_R = cutscene.written_range(orig)
-    CRY_R = [(crytbl.DATA, crytbl.LIMIT)]
+    CRY_R = [(crytbl.DATA, crytbl.LIMIT), (montbl.LO, montbl.HI)]
     MENU_R = []
     for a in {addr for addr, _, _ in patch_menu.GLYPHS}:
         cap = patch_menu.block_limit(orig, a)
@@ -356,6 +359,12 @@ def main(orig_p, new_p, tsv):
     print(f"[19] 울음소리 {len(crytbl.WORDS)}개: 불일치 {len(crbad)}개"
           + (f" {crbad[:3]}" if crbad else ""))
     fail += len(crbad)
+
+    mnbad = montbl.verify(new, orig, codes, tbl)
+    nk = sum(1 for _, k in montbl.WORDS if k)
+    print(f"[20] 몬스터·화자 이름 {nk}개: 불일치 {len(mnbad)}개"
+          + (f" {mnbad[:3]}" if mnbad else ""))
+    fail += len(mnbad)
 
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0
