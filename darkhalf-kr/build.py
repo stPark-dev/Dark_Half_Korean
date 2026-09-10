@@ -31,6 +31,7 @@ import patch_menu
 import opening
 import patch_hwfont
 import cutscene
+import crytbl
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -54,6 +55,9 @@ TBL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl")
 # **용사 쪽** 「컨디션」「진형」이다 (마왕 쪽은 0x04f45c·0x04f466 로 딴 벌이다).
 # 용사 메뉴가 그대로 깨져 보인 이유였다 (image/확인.png).
 LIST_TBL = (0x04f137, 0x04f470)
+
+# 몬스터·화자 이름표. 여기도 타일 직접이다 (PROGRESS 4.39.2).
+NAME_TBL = (0x04f672, 0x04f8f9)
 
 
 def load_tsv(tsv):
@@ -85,7 +89,7 @@ def plan(orig, rows, t):
     # 넘겨 우선 배정 대상에 들어가게 한다.
     pairs = (dlg + [(cap, txt) for _, cap, txt in desc_items]
              + words.pairs(orig) + nametbl.pairs(orig) + patch_ending.pairs()
-             + patch_opt.pairs())
+             + patch_opt.pairs() + crytbl.pairs(orig))
 
     # 표 항목이 원본 칸에 안 들어가면, 그 항목의 음절만 절대 우선으로 돌려
     # 다시 배정한다. 실패가 없어질 때까지 반복하므로 필요한 최소만 강제한다.
@@ -139,7 +143,7 @@ def plan(orig, rows, t):
     menu_txt = ([txt for ad, txt in dlg_addr if not is_story(ad, txt)]
                 + [txt for _, _, txt in desc_items]
                 + list(words.texts()) + list(nametbl.texts())
-                + list(patch_opt.texts()))
+                + list(patch_opt.texts()) + list(crytbl.texts()))
     no_risky = set()
     for txt in menu_txt:
         for kind, v in krcodec.parse(txt):
@@ -215,6 +219,31 @@ def plan(orig, rows, t):
     for _ad, _txt in dlg_addr:
         if not (LIST_TBL[0] <= _ad < LIST_TBL[1]): continue
         for kind, v in krcodec.parse(_txt):
+            if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+    # 이름표(0x04f672~)가 <EB> 로 끌어 쓰는 단어표 엔트리 — 인물 이름이다.
+    # 그 표는 타일 직접이라 상태창에 「팔코」가 「팔?서」로 나왔다
+    # (image/오류-팔코이름.png). 닿는 음절만 단일바이트로 못 박는다.
+    import words as _w
+    _eb = set(); _a = NAME_TBL[0]
+    while _a < NAME_TBL[1]:
+        _b = orig[_a]
+        if _b == 0xEB: _eb.add(orig[_a+1]); _a += 2; continue
+        if _b == 0xEE: _a += 3; continue
+        if _b == 0xF0 and orig[_a+1] == 0xC4: _a += 4; continue
+        _a += 1
+    # 110칸이 몬스터 이름과 인물 이름이 함께 쓰는 예산이라 전부는 못 넣는다.
+    # 재 보면 루큐·팔코·카이오스는 107자(여유 3)인데 카렌을 더하면 110자로
+    # 꽉 차고 대사 초과가 11 -> 34 개로 뛴다. 카렌은 몬스터 이름(A/B/C 결정)과
+    # 같은 예산을 다투므로 함께 정한다.
+    NAME_EB = {0x00, 0x04, 0x0F}          # 루큐 · 팔코 · 카이오스
+    for _n in (_eb & NAME_EB):
+        if _n < len(_w.WORDS) and _w.WORDS[_n][1]:
+            for _c in _w.WORDS[_n][1]:
+                if krcodec.is_hangul(_c): force.add(_c)
+    # 전투 울음소리 표(0x05b39c)도 렌더러를 못 갈랐다. 어느 쪽이든 안전하게
+    # 단일바이트로 못 박는다 — 의성어라 낱말 선택이 자유로워 값이 안 든다.
+    for _kr in crytbl.texts():
+        for kind, v in krcodec.parse(_kr):
             if kind == "ch" and krcodec.is_hangul(v): force.add(v)
     for _ in range(8):
         codes, freq, st = tralloc.allocate(pairs, t, force=force, no_risky=no_risky,
@@ -316,6 +345,13 @@ def main(src, tsv, dst, engine=True):
     # 글꼴은 엔트리 28 블록 6~17, 본문은 0x0f0b92 의 타일맵 스트림이다
     # (PROGRESS 4.41). 대사 배정과 무관해서 codes 를 받지 않는다.
     rom = bytearray(cutscene.apply(rom, verbose=True))
+    # 전투 울음소리 12개 (PROGRESS 4.43)
+    rom, cover = crytbl.apply(rom, codes, t); rom = bytearray(rom)
+    if cover:
+        print(f"!! 울음소리 초과 {len(cover)}개")
+        for a, kr, n, cap in cover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")
+        raise SystemExit(1)
+    print(f"울음소리: {len(crytbl.WORDS)}개 제자리 삽입")
     if oover:
         print(f"!! 설정 화면 초과/불가 {len(oover)}개")
         for a, kr, n, cap in oover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")
