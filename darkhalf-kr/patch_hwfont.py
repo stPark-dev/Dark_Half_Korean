@@ -59,7 +59,6 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
 import gfx, patch_menu
 
 ENTRY = 0
@@ -71,21 +70,26 @@ BG_CODE = 0x20          # 공백 글리프 = 순수 배경 (확인용)
 INK = 3
 
 # 배경 후보. 앞에서부터 시도해 칸에 들어가는 첫 것을 쓴다.
-BG_KINDS = ("가로줄", "단색")
-
-# 8x8 에 한글을 넣으면 ㅇ·ㅎ 의 속공간이 메워진다. 후보 8개를 실제 이름으로
-# 나란히 그려 골랐다 (malgunbd/malgun/NanumGothic/NanumBarunGothic x 크기 x 문턱).
-# NanumGothic 9px 문턱 60 이 가장 낫다 — 무라마사·독무·죽음·용세이버·마계문·
-# 결계가 제대로 읽힌다. malgunbd 는 「무라마사」가 「부라마사」로, 「오거」가
-# 「모거」로 보였다.
 #
-# 남는 한계: **받침 ㅇ 은 두 픽셀 높이라 속공간을 낼 수 없다.** 그래서 「방어」가
-# 「밤어」, 「강화」가 「감화」, 「상태」가 「삼태」로 보인다. 3x3 이상 채워진
-# 덩어리의 가운데를 뚫는 후처리를 시험했지만 그 덩어리 자체가 2행뿐이라
-# 걸리는 곳이 없었다. 제대로 고치려면 8x8 자모를 손으로 그려 조합해야 한다.
-FONT = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
-SIZE = 9
-THR = 60
+# 한때 「가로줄」(행마다 색 1·2 교대)을 먼저 뒀다. 원본 노이즈 디더에 가장
+# 가까우면서 칸에 들어가는 것이 그것뿐이었기 때문이다. 자모 조합으로 바꾸니
+# 「단색」도 넉넉히 들어가고(456/770), **가로줄이 한글의 가로획과 섞여**
+# 읽기를 방해한다는 것이 나란히 그려 보니 분명했다. 단색을 먼저 쓴다.
+BG_KINDS = ("단색", "가로줄")
+
+# 글리프는 **자모를 손으로 그려 조합한다** (hangul8.py).
+#
+# 한때 TrueType 을 8px 로 래스터했다. 후보 8개(malgunbd/malgun/NanumGothic/
+# NanumBarunGothic x 크기 x 문턱)를 실제 이름으로 나란히 그려 NanumGothic
+# 9px/60 을 골랐지만, 어느 조합으로도 **받침 ㅇ 이 두 픽셀 높이라 속공간을
+# 낼 수 없었다.** 「방어」가 「밤어」, 「아무것도」가 「마루것노」, 「모두
+# 도망」이 「보두 노맘」으로 읽혔다 (image/전투화면-선택지깨짐.png).
+#
+# 3x3 이상 채워진 덩어리의 가운데를 뚫는 후처리도 시험했는데, 그 덩어리가
+# 2행뿐이라 걸리는 곳이 아예 없었다. 래스터로는 안 되는 문제였다.
+#
+# 자모 조합으로 바꾸니 전부 살아났다 — 방어 · 상태 · 아무것도 · 모두 도망 ·
+# 지팡이 · 용세이버. 대조는 PROGRESS 4.42.
 
 _bgcache = None
 
@@ -123,15 +127,10 @@ def background(kind):
 
 def render(ch, kind=BG_KINDS[0]):
     """8x8 색인 배열. 배경 위에 색 3 으로 획을 얹는다."""
+    import hangul8
     g = background(kind)
     if ch == " ": return g
-    f = ImageFont.truetype(FONT, SIZE)
-    im = Image.new("L", (8, 8), 0)
-    d = ImageDraw.Draw(im)
-    bb = d.textbbox((0, 0), ch, font=f)
-    d.text(((8 - (bb[2] - bb[0])) / 2 - bb[0],
-            (8 - (bb[3] - bb[1])) / 2 - bb[1]), ch, 255, font=f)
-    g[np.array(im) > THR] = INK
+    g[np.array(hangul8.glyph(ch))] = INK
     return g
 
 
