@@ -43,7 +43,7 @@ def report(tsv, worst=12):
         # trcheck 만 초과를 보고했다).
         import build
         orig = open(ROM_FOR_SLOTS, 'rb').read()
-        codes, freq, st, _force, _desc, _dlg = build.plan(orig, rows, tbl)
+        codes, freq, st, _force, _desc, _dlg, _nui = build.plan(orig, rows, tbl)
     except SystemExit as e:
         print(f"\n!! 배정 불가: {e}")
         uniq = {v for t in texts for k, v in krcodec.parse(t)

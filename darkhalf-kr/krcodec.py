@@ -211,7 +211,7 @@ def is_hangul(ch):
     return 0xAC00 <= ord(ch) <= 0xD7A3
 
 def allocate(texts, base_table, priority=(), force=(), no_risky=(),
-             reserve_safe=0):
+             reserve_safe=0, no_ui=()):
     """번역문들에서 음절 빈도를 세어 코드 배정.
     priority 에 든 문자열의 음절은 단일바이트를 먼저 받는다.
     (메뉴 라벨처럼 예산이 3~8바이트로 빡빡한 곳을 우선 보장)
@@ -237,10 +237,19 @@ def allocate(texts, base_table, priority=(), force=(), no_risky=(),
     for t in priority:
         for kind, v in parse(t):
             if kind == "ch" and is_hangul(v): pri.add(v)
-    fs = set(force)
-    ordered = sorted(freq, key=lambda c: (c not in fs, c not in pri, -freq[c]))
-    # 8x8 칸이 창 장식인 코드는 단일바이트 풀의 **맨 뒤**로 민다. ordered 는
-    # force 가 앞이므로, 목록·필드에 실리는 음절은 이 코드를 받지 않는다.
+    fs = set(force); nu = set(no_ui)
+    ordered = sorted(freq, key=lambda c: (c not in fs, c not in nu,
+                                          c not in pri, -freq[c]))
+    # 8x8 칸이 창 장식인 코드는 단일바이트 풀의 **맨 뒤**로 민다.
+    #
+    # 「force 가 앞이니 목록 음절은 안 걸린다」로 충분했던 때가 있었다. A안
+    # (4.46)에서 강제가 114자로 늘어 목록안전 110칸을 넘자 뒤쪽 넷(광·렌·
+    # 범·윈)이 장식칸에 앉았다. 강제 안에서도 순서를 갈라야 한다.
+    #
+    # no_ui 는 **목록 창 폰트로 그려지는** 음절이다 (아이템·마법·몬스터·
+    # 화자 이름표와 <ED> 필드). 이 창은 장식칸을 글자로 안 읽으므로 그 코드를
+    # 받으면 이름이 창틀 무늬로 나온다. 나머지 강제(설정 화면·단어표)는
+    # 대사 렌더러가 그리고 그쪽 글리프는 우리가 한글로 덮었으므로 괜찮다.
     _ui = hw_ui()
     single = ([c for c in reclaimable() if c not in _ui]
               + [c for c in reclaimable() if c in _ui])

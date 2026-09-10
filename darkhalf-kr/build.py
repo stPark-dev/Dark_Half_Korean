@@ -76,7 +76,7 @@ def plan(orig, rows, t):
     trcheck 가 689자, build 가 703자로 갈려 trcheck 만 초과를 보고했다.
     그래서 입력 구성과 force 반복을 여기 한 곳에 둔다.
 
-    반환: (codes, freq, st, force, desc_items, dlg)
+    반환: (codes, freq, st, force, desc_items, dlg, no_ui)
     """
     runs = find_runs(orig)
     desc_items = [(runs[i][0] + PREFIX, runs[i][1] - PREFIX, txt)
@@ -177,6 +177,12 @@ def plan(orig, rows, t):
     # 잡으면 <ED> 가 본문에 섞인 이야기 대사(#717~#725)까지 딸려 온다.
     TOKS = _re.compile(r'(<ED>(?:<[0-9A-Fa-f]{2}>|<[魔士見入]>|.))')
 
+    # 세그먼트 끝에서 닫히는 필드도 있다. #60 「あいてにしない」 는 <ED>出 로
+    # 열고 <ED>界 없이 <EE> 로 세그먼트를 끝낸다 (#44 「시전」 #49 「장비」 도
+    # 같다). 여는 쪽으로 잡되 **<ED>界 가 있는 세그먼트에서만** 잡으면 이야기
+    # 대사와 깨끗이 갈린다 — #717~#725 에는 <ED>界 가 없다.
+    TAIL = _re.compile(r'<ED>出((?:(?!<ED>).)*)$')
+
     def _fields(txt):
         out = FIELD.findall(txt)
         if '<ED>出' not in txt: return out
@@ -185,14 +191,26 @@ def plan(orig, rows, t):
             if i + 2 < len(ps) and ps[i+2] == '<ED>界': out.append(ps[i+1])
         m = LEAD.match(txt)
         if m and m.group(2) != '出': out.append(m.group(1))
+        if '<ED>界' in txt:
+            out += TAIL.findall(txt)
         return out
     # 설정 화면은 칸 수를 정확히 맞춰야 해서 이스케이프 개수까지 지정된다.
     # 줄이는 수단은 단일바이트 승격뿐이다 (patch_opt.FORCE 주석 참조).
     force = {"호"} | patch_opt.FORCE
+    # no_ui: 목록 창 폰트로 그려지는 음절. 창 장식칸(krcodec.hw_ui)에 앉으면
+    # 이름이 창틀 무늬로 나온다. force 의 부분집합이고, 설정 화면과 단어표는
+    # 대사 렌더러가 그리므로 여기 들어가지 않는다 (PROGRESS 4.46.4).
+    no_ui = {"호"}
+
+    def _force(v, ui=True):
+        if krcodec.is_hangul(v):
+            force.add(v)
+            if ui: no_ui.add(v)
+
     for _, txt in dlg_addr:
         for f in _fields(txt):
             for kind, v in krcodec.parse(f):
-                if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+                if kind == "ch": _force(v)
 
     # 목록 창(마법·아이템·장비)은 **바이트 하나를 타일 하나로** 그린다.
     # 타일맵의 타일 번호가 대사 폰트의 단일바이트 코드와 그대로 같다
@@ -214,14 +232,14 @@ def plan(orig, rows, t):
         for _ja, _kr in _wl:
             if not _kr: continue
             for kind, v in krcodec.parse(_kr):
-                if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+                if kind == "ch": _force(v)
     # 아이템·장비 이름표(0x04f1c0~0x04f470)도 같은 목록 창에 실린다.
     # 이 문자열은 nametbl 이 아니라 TSV 가 정본이라 주소로 골라야 한다.
     # 「상태」「대형」 같은 메뉴 라벨도 이 구간에 있고 같은 창에서 그려진다.
     for _ad, _txt in dlg_addr:
         if not (LIST_TBL[0] <= _ad < LIST_TBL[1]): continue
         for kind, v in krcodec.parse(_txt):
-            if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+            if kind == "ch": _force(v)
     # 이름표(0x04f672~)가 <EB> 로 끌어 쓰는 단어표 엔트리 — 인물 이름이다.
     # 그 표는 타일 직접이라 상태창에 「팔코」가 「팔?서」로 나왔다
     # (image/오류-팔코이름.png). 닿는 음절만 단일바이트로 못 박는다.
@@ -233,28 +251,29 @@ def plan(orig, rows, t):
         if _b == 0xEE: _a += 3; continue
         if _b == 0xF0 and orig[_a+1] == 0xC4: _a += 4; continue
         _a += 1
-    # 110칸이 몬스터 이름과 인물 이름이 함께 쓰는 예산이라 전부는 못 넣는다.
-    # 재 보면 루큐·팔코·카이오스는 107자(여유 3)인데 카렌을 더하면 110자로
-    # 꽉 차고 대사 초과가 11 -> 34 개로 뛴다. 카렌은 몬스터 이름(A/B/C 결정)과
-    # 같은 예산을 다투므로 함께 정한다.
-    NAME_EB = {0x00, 0x04, 0x0F}          # 루큐 · 팔코 · 카이오스
-    for _n in (_eb & NAME_EB):
+    # 이름표가 <EB> 로 부르는 것은 일곱이다 (뱅크 04 스캔 결과). 예전에는 셋만
+    # 못 박아서 베르길·아바·윈담·카렌이 이름창에서 깨졌다. A안(4.46)에서
+    # 아이템·마법·필드 라벨을 팔레트 낱말로 되팔아 칸을 만들고 일곱을 다 넣었다.
+    for _n in sorted(_eb):
         if _n < len(_w.WORDS) and _w.WORDS[_n][1]:
-            for _c in _w.WORDS[_n][1]:
-                if krcodec.is_hangul(_c): force.add(_c)
+            for _c in _w.WORDS[_n][1]: _force(_c)
+    # 마법 목록의 [0x11] 은 <EB><17>(마계문) 이다. 목록 창에 실리므로 같다.
+    if _w.WORDS[0x17][1]:
+        for _c in _w.WORDS[0x17][1]: _force(_c)
     # 몬스터·화자 이름표도 타일 직접이다. 여기 쓰는 낱말은 이미 단일바이트인
     # 음절로만 지어 놨으므로(montbl 주석) 강제해도 값이 들지 않는다.
     for _kr in montbl.texts():
         for kind, v in krcodec.parse(_kr):
-            if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+            if kind == "ch": _force(v)
     # 전투 울음소리 표(0x05b39c)도 렌더러를 못 갈랐다. 어느 쪽이든 안전하게
     # 단일바이트로 못 박는다 — 의성어라 낱말 선택이 자유로워 값이 안 든다.
     for _kr in crytbl.texts():
         for kind, v in krcodec.parse(_kr):
-            if kind == "ch" and krcodec.is_hangul(v): force.add(v)
+            if kind == "ch": _force(v)      # 렌더러를 못 갈랐다 — 안전한 쪽
     for _ in range(8):
         codes, freq, st = tralloc.allocate(pairs, t, force=force, no_risky=no_risky,
-                                           reserve_safe=patch_opt.TWIN_RESERVE)
+                                           reserve_safe=patch_opt.TWIN_RESERVE,
+                                           no_ui=no_ui)
         probe = bytearray(orig)
         miss = ([kr for _, kr, _, _ in patch_words.apply(probe, codes, t)]
                 + [kr for _, _, kr, _, _ in patch_names.apply(probe, codes, t)])
@@ -266,7 +285,7 @@ def plan(orig, rows, t):
             for kind, v in krcodec.parse(kr):
                 if kind == "ch" and krcodec.is_hangul(v): force.add(v)
         force |= optneed
-    return codes, freq, st, force, desc_items, dlg
+    return codes, freq, st, force, desc_items, dlg, no_ui
 
 
 def main(src, tsv, dst, engine=True):
@@ -278,7 +297,7 @@ def main(src, tsv, dst, engine=True):
     assert len(rows) == len(segs), f"행 수 불일치 {len(rows)} != {len(segs)}"
 
     # --- 1) 모든 한국어를 모아 한 번만 배정 ---
-    codes, freq, st, force, desc_items, dlg = plan(orig, rows, t)
+    codes, freq, st, force, desc_items, dlg, _no_ui = plan(orig, rows, t)
     if force:
         print(f"표 칸을 맞추려 절대 우선으로 돌린 음절 {len(force)}자: "
               f"{''.join(sorted(force))}")
