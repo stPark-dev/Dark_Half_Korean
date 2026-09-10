@@ -30,6 +30,7 @@ import patch_opt
 import patch_menu
 import opening
 import patch_hwfont
+import cutscene
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -311,6 +312,10 @@ def main(src, tsv, dst, engine=True):
     # 그 8x8 반각 폰트에도 같은 코드 자리에 한글을 넣어야 한다
     # (PROGRESS 4.34~4.35).
     rom = bytearray(patch_hwfont.apply(rom, codes, verbose=True))
+    # 컷신 「復活節第N日」 은 BG 타일맵이고 글자가 16x16(2x2 타일)이다.
+    # 글꼴은 엔트리 28 블록 6~17, 본문은 0x0f0b92 의 타일맵 스트림이다
+    # (PROGRESS 4.41). 대사 배정과 무관해서 codes 를 받지 않는다.
+    rom = bytearray(cutscene.apply(rom, verbose=True))
     if oover:
         print(f"!! 설정 화면 초과/불가 {len(oover)}개")
         for a, kr, n, cap in oover: print(f"   {a:#08x} 「{kr}」: {n}/{cap}")

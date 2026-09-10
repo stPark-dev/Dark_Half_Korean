@@ -118,11 +118,13 @@ def main(orig_p, new_p, tsv):
 
     # 메뉴 폰트 블록 (4bpp 압축). 다시 압축하면 길이가 줄어서 블록 안쪽만
     # 바뀌지만, 어디까지 바뀔지는 블록 한도까지다.
-    import patch_menu, opening, patch_hwfont
+    import patch_menu, opening, patch_hwfont, cutscene
     # 오프닝: 스크립트 구간과 엔트리 18 의 텍스트 블록들
     OPEN_R = opening.written_range(orig)
     # 반각 폰트: 엔트리 0 의 블록 9개
     HW_R = patch_hwfont.written_range(orig)
+    # 컷신: 타일맵 스트림과 엔트리 28 의 글꼴 블록 12개
+    CUT_R = cutscene.written_range(orig)
     MENU_R = []
     for a in {addr for addr, _, _ in patch_menu.GLYPHS}:
         cap = patch_menu.block_limit(orig, a)
@@ -138,7 +140,8 @@ def main(orig_p, new_p, tsv):
            and not any(a <= i < b for a, b in ENGINE_R)
            and not any(a <= i < b for a, b in MENU_R)
            and not any(a <= i < b for a, b in OPEN_R)
-           and not any(a <= i < b for a, b in HW_R)]
+           and not any(a <= i < b for a, b in HW_R)
+           and not any(a <= i < b for a, b in CUT_R)]
     print(f"[5] 허용 영역 밖 변경 {len(out)}바이트"); fail += len(out)
 
     # 포인터를 실제로 따라가 되읽는다. 포인터와 문자열이 함께 옳아야 통과한다.
@@ -340,6 +343,12 @@ def main(orig_p, new_p, tsv):
     print(f"[17] 장식칸에 앉은 목록·필드 음절: {len(uibad)}자"
           + (f" {''.join(uibad)}" if uibad else ""))
     fail += len(uibad)
+
+    # [18] 컷신 26줄 — 타일맵을 되읽어 한국어와 맞는지, 글꼴 칸이 맞는지.
+    cbad = cutscene.verify(new, orig)
+    print(f"[18] 컷신 {len(cutscene.TEXT)}줄: 불일치 {len(cbad)}개"
+          + (f" {cbad[:2]}" if cbad else ""))
+    fail += len(cbad)
 
     print("\n" + ("전부 통과" if not fail else f"실패 {fail}건"))
     return 1 if fail else 0
