@@ -35,12 +35,24 @@ def main(orig_p, new_p, tsv):
             for l in open(tsv, encoding='utf-8').readlines()[1:]]
     fail = 0
 
+    # 남는 칸 배치(eejump.pad)와 <EE> 꼬리 점프 재지정(eejump.plan)까지 반영한
+    # 기대 바이트. 점프 포인터는 미번역 세그먼트 안에도 있다.
+    import eejump
+    EEP = {}
+    for ns, nt, _ in eejump.plan(rows, codes, tbl):
+        EEP[ns+1] = nt & 0xFF; EEP[ns+2] = (nt >> 8) & 0xFF
+    def expect(a, L, raw):
+        b = bytearray(raw)
+        for i in range(L):
+            if a + i in EEP: b[i] = EEP[a + i]
+        return bytes(b)
+
     ok = bad = 0
     for c in rows:
         a, L, tr = int(c[2], 16), int(c[3]), (c[8] if len(c) > 8 else "")
         if not tr.strip(): continue
-        want = krcodec.encode(tr, codes, tbl); got = new[a:a+L]
-        if got[:len(want)] == want and got[len(want):] == b'\x20'*(L-len(want)):
+        want = expect(a, L, eejump.pad(a, L, tr, codes, tbl)[0]); got = new[a:a+L]
+        if got == want:
             ok += 1
         else:
             bad += 1
@@ -62,7 +74,8 @@ def main(orig_p, new_p, tsv):
                if not (c[8] if len(c) > 8 else "").strip()
                and not name_owned(int(c[2],16), int(c[3]))
                and new[int(c[2],16):int(c[2],16)+int(c[3])]
-                != orig[int(c[2],16):int(c[2],16)+int(c[3])])
+                != expect(int(c[2],16), int(c[3]),
+                          orig[int(c[2],16):int(c[2],16)+int(c[3])]))
     print(f"[2] 미번역 세그먼트 원본 보존: 차이 {diff}개"); fail += diff
 
     # 엔딩 텍스트는 폰트 영역 안(0x2FCFC0~0x2FF780)에 있다. 그 자리는 글리프가
@@ -209,6 +222,7 @@ def main(orig_p, new_p, tsv):
         def risky(buf):
             r, i = [], 0
             while i < len(buf) - 1:
+                if buf[i] == 0xEE: i += 3; continue     # 점프 인자는 포인터다
                 if buf[i] in (0xF4, 0xF5, 0xF6, 0xF7, 0x5D, 0xD5):
                     if not krcodec.menu_safe(buf[i:i+2]):
                         r.append((hex(buf[i]), hex(buf[i+1])))
@@ -316,8 +330,8 @@ def main(orig_p, new_p, tsv):
         while True:
             b = rom[a]
             if b == 0xFF: return out
-            if b == 0xEE:
-                return out + _asm(rom, 0x040000 | rom[a+1] | (rom[a+2] << 8), depth+1)
+            if b == 0xEE:   # 같은 뱅크 점프 (단어표는 뱅크 05)
+                return out + _asm(rom, (a & 0xFF0000) | rom[a+1] | (rom[a+2] << 8), depth+1)
             if b == 0xF0 and rom[a+1] == 0xC4:
                 out += _asm(rom, 0x040000 | rom[a+2] | (rom[a+3] << 8), depth+1)
                 a += 4; continue

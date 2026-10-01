@@ -68,7 +68,8 @@ def assemble(rom, a, depth=0, words_slots=None):
         b = rom[a]
         if b == 0xFF: return out
         if b == 0xEE:
-            return out + assemble(rom, BANK | rom[a+1] | (rom[a+2] << 8),
+            # 같은 뱅크 점프다. 단어표(뱅크 05)도 남는 칸을 <EE> 로 건너뛴다.
+            return out + assemble(rom, (a & 0xFF0000) | rom[a+1] | (rom[a+2] << 8),
                                   depth+1, words_slots)
         if b == 0xF0 and rom[a+1] == 0xC4:
             out += assemble(rom, BANK | rom[a+2] | (rom[a+3] << 8),

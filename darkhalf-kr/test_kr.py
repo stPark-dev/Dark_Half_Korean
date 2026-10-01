@@ -133,6 +133,10 @@ def main(rom_path):
                            capture_output=True, text=True)
         check("build 정상 종료", r.returncode == 0 and os.path.exists(o),
               (r.stdout + r.stderr)[-300:])
+        if os.path.exists(o):
+            test_ee_jumps(rom_path, o)
+            test_word_padding(rom_path, o)
+            test_pad_position(rom_path, o)
 
     test_readable_safe(rom_path)
     test_readable_roundtrip(rom_path)
@@ -141,6 +145,146 @@ def main(rom_path):
     if FAIL:
         print(f"실패 {len(FAIL)}개: " + ", ".join(FAIL)); sys.exit(1)
     print("전부 통과")
+
+# <EE> lo hi 는 같은 뱅크 안으로 뛰는 꼬리 점프다. 아래는 원본에서 **번역된
+# 세그먼트의 중간**으로 뛰는 점프 전부다 (출처 <EE> 주소, 원본 착지점).
+# 번역으로 착지점 앞이 짧아지면 같은 주소에 다른 바이트가 온다. 루큐 전투
+# 명령 창(#60 -> #59 꼬리)이 그렇게 테두리를 잃었다.
+EE_JUMPS = [
+    (0x40ccc, 0x40c44), (0x40da9, 0x40c44), (0x40dc9, 0x40c4c), (0x40dd7, 0x40c4c),
+    (0x40df5, 0x40c0d), (0x40e1a, 0x40c4c), (0x40e2a, 0x40de7), (0x40ec9, 0x40eae),
+    (0x40f26, 0x41147), (0x40f40, 0x40ff4), (0x41026, 0x40fe5), (0x4119f, 0x41161),
+    (0x41236, 0x411f9), (0x4125e, 0x418f8), (0x413b1, 0x41918), (0x413cf, 0x41918),
+    (0x413e0, 0x413e7), (0x413f0, 0x40c0d), (0x413fe, 0x40c0d), (0x4141e, 0x40cc5),
+    (0x415be, 0x40c0d), (0x415f4, 0x40c90), (0x4166e, 0x40c0d), (0x4171c, 0x40c0d),
+    (0x418ea, 0x418d0), (0x41901, 0x40c44), (0x41937, 0x41918), (0x41952, 0x40c0d),
+    (0x4195d, 0x41918), (0x419d3, 0x419b0), (0x419e3, 0x419b0), (0x419f4, 0x419b1),
+    (0x41a08, 0x419b0), (0x41a6a, 0x41a37), (0x41a7b, 0x41a11), (0x41ca1, 0x41c95),
+    (0x41d08, 0x40c0d), (0x4317c, 0x430a2), (0x431cf, 0x430a2), (0x43636, 0x4365e),
+    (0x43970, 0x423d4), (0x449b4, 0x4494a), (0x459ad, 0x459df), (0x45f5a, 0x45f04),
+    (0x4688d, 0x451c2), (0x4756b, 0x474d6), (0x49326, 0x49393), (0x4989a, 0x423d4),
+    (0x4aa19, 0x4a8be), (0x4d55a, 0x444e6), (0x4d88b, 0x4d866), (0x4e492, 0x4e4b1),
+    (0x4e4a3, 0x4e4b1), (0x4f0af, 0x4e0a9), (0x4f989, 0x4f95f), (0x4fd27, 0x41d0b),
+    (0x4fd2c, 0x41d0b), (0x4fd31, 0x41d11), (0x4fd36, 0x41d11), (0x4fe55, 0x41d0b),
+    (0x4fe75, 0x41d0b), (0x4fe95, 0x41d0b),
+] + [(a, 0x4e0c6) for a in (   # 워프 목록 25개 -> #1077 「魔空城」 의 꼬리
+    0x4e0e0, 0x4e0f6, 0x4e10c, 0x4e11d, 0x4e134, 0x4e149, 0x4e15a, 0x4e16c,
+    0x4e17d, 0x4e190, 0x4e1a5, 0x4e1b8, 0x4e1cb, 0x4e1dc, 0x4e1ed, 0x4e200,
+    0x4e211, 0x4e220, 0x4e233, 0x4efc8, 0x4efdf, 0x4eff4, 0x4f00a, 0x4f021,
+    0x4f035)]
+# 착지점이 문장 한가운데인 것 — 한국어에서 꼬리가 시작해야 하는 글자.
+EE_TEXT_TAIL = {
+    0x40c90: "못 씁니다！", 0x40cc5: "수 없습니다！", 0x40de7: "합니다<F1> 괜찮습니까？",
+    0x40eae: "가<F1> 되었습니다", 0x41147: " 그만", 0x41161: "절 <F3>",
+    0x413e7: "에서 해제할까요？", 0x418d0: " 의미가 없다", 0x418f8: "가 부족합니다！",
+    0x41918: "\\n골라 주세요", 0x419b0: "Ｐ）이<F1>", 0x419b1: "）이<F1>",
+    0x41c95: "얻었다！", 0x430a2: " 그 검을", 0x4365e: "←石<03>",
+    0x444e6: " <EB><19> ５개", 0x474d6: " 여기서는 저를 믿고",
+}
+
+def _segments(rom_path):
+    rows = [l.rstrip('\n').split('\t') for l in
+            open("darkhalf-kr/script_main.tsv", encoding='utf-8').readlines()[1:]]
+    return [(int(c[2], 16), int(c[3]), c[8] if len(c) > 8 else "") for c in rows]
+
+def test_ee_jumps(rom_path, kr_path):
+    import json, krcodec
+    from dump import load_tbl
+    tbl = load_tbl(os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl"))
+    orig = open(rom_path, 'rb').read(); kr = open(kr_path, 'rb').read()
+    codes = {k: bytes.fromhex(v) for k, v in
+             json.load(open(kr_path + ".codes.json", encoding='utf-8')).items()}
+    segs = _segments(rom_path)
+    def seg(a): return next(s for s in segs if s[0] <= a < s[0] + s[1])
+    print("[11] <EE> 꼬리 점프 — 번역된 세그먼트 안쪽 착지점")
+    bad = []
+    for src, t in EE_JUMPS:
+        assert orig[src] == 0xEE and (0x040000 | orig[src+1] | orig[src+2] << 8) == t
+        (sa, sl, _), (ta, tl, _) = seg(src), seg(t)
+        # 출처 세그먼트 안에서 대상 세그먼트로 뛰는 <EE> 를 찾는다
+        hits = [0x040000 | kr[i+1] | kr[i+2] << 8 for i in range(sa, sa + sl - 2)
+                if kr[i] == 0xEE and ta < (0x040000 | kr[i+1] | kr[i+2] << 8) < ta + tl]
+        if t in EE_TEXT_TAIL:
+            want = krcodec.encode(EE_TEXT_TAIL[t], codes, tbl)
+        else:
+            want = orig[t:t+1]
+        ok = hits and all(kr[h:h+len(want)] == want for h in hits)
+        if not ok: bad.append((hex(src), hex(t), [hex(h) for h in hits]))
+    check(f"점프 {len(EE_JUMPS)}개 착지점 일치", not bad, f"{len(bad)}개 예: {bad[:4]}")
+    # 루큐 전투 명령 창: #60 의 끝 <EE> 가 #59 의 창 닫기 꼬리에 정확히 닿아야 한다
+    tail = bytes.fromhex("ed2c0a0009f9070a0006fc0507dedf")
+    hits = [0x040000 | kr[i+1] | kr[i+2] << 8 for i in range(0x041209, 0x041239)
+            if kr[i] == 0xEE]
+    check("루큐 전투 명령 창 닫기 꼬리", hits and kr[hits[-1]:hits[-1]+len(tail)] == tail,
+          f"{[hex(h) for h in hits]} {kr[hits[-1]:hits[-1]+15].hex() if hits else ''}")
+    # 꼬리 뒤에 남는 칸 공백이 오면 창이 닫힌 뒤 테두리 위에 그려진다
+    check("창 닫기 꼬리 바로 뒤가 종료자", hits and kr[hits[-1]+len(tail)] == 0xFF,
+          f"{kr[hits[-1]:hits[-1]+18].hex() if hits else ''}")
+
+def test_pad_position(rom_path, kr_path):
+    """남는 칸 공백은 한글(과 바로 뒤 문장부호) 뒤에만 끼운다.
+
+    <E9>！者 의 ！ 는 문장부호가 아니라 명령 인자다. 그 앞뒤에 공백을 끼우자
+    명령이 깨지고 者(=한글 「게」 자리)가 화면에 찍혔다 (마왕 정상 게).
+    """
+    import json, krcodec, eejump
+    from dump import load_tbl
+    tbl = load_tbl(os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl"))
+    orig = open(rom_path, 'rb').read(); kr = open(kr_path, 'rb').read()
+    codes = {k: bytes.fromhex(v) for k, v in
+             json.load(open(kr_path + ".codes.json", encoding='utf-8')).items()}
+    print("[13] 남는 칸 공백 위치 — 제어 인자 사이에 끼지 않는다")
+    bad = []
+    for a, L, tr in _segments(rom_path):
+        if not tr.strip(): continue
+        toks = krcodec.parse(tr)
+        b, at, n = eejump.pad(a, L, tr, codes, tbl)
+        if not n or b[at:at+n] == b"\xed\x24": continue
+        off, prev = 0, []
+        for k, v in toks:
+            if off == at: break
+            off += len(v if k == "raw" else krcodec.encode(v, codes, tbl)); prev.append((k, v))
+        i = len(prev) - 1
+        while i >= 0 and prev[i][0] == "ch" and not krcodec.is_hangul(prev[i][1]):
+            i -= 1
+        if i < 0 or prev[i][0] != "ch": bad.append((hex(a), tr[-30:]))
+    check("공백은 한글 뒤에만", not bad, f"{len(bad)}개 예: {bad[:3]}")
+    tail = bytes.fromhex("e9213ce937ff")
+    check("#1077 꼬리 <E9>！者<E9>７ 보존", kr[0x4e0b7:0x4e0cc].endswith(tail),
+          kr[0x4e0b7:0x4e0cc].hex())
+
+def test_word_padding(rom_path, kr_path):
+    """단어표의 남는 칸이 화면에 공백으로 찍히지 않아야 한다.
+
+    한국어가 원문보다 짧아 남는 칸을 0x20 으로 채웠더니 「파르코⎵는」
+    「마왕⎵⎵의」 처럼 단어마다 뒤에 공백이 붙었다. 렌더러가 따라 읽는 대로
+    (<EE> 는 같은 뱅크로 점프) 되읽어 한국어 그대로인지 본다. 순차 주사
+    루틴 때문에 0xFF 는 엔트리마다 하나, 원래 자리에만 있어야 한다.
+    """
+    import json, krcodec, words
+    from dump import load_tbl, BANK_CH
+    tbl = load_tbl(os.path.join(os.path.dirname(os.path.abspath(__file__)), "darkhalf.tbl"))
+    orig = open(rom_path, 'rb').read(); kr = open(kr_path, 'rb').read()
+    codes = {k: bytes.fromhex(v) for k, v in
+             json.load(open(kr_path + ".codes.json", encoding='utf-8')).items()}
+    print("[12] 단어표 — 남는 칸이 공백으로 찍히지 않는다")
+    def follow(a):
+        out = bytearray()
+        for _ in range(64):
+            b = kr[a]
+            if b == 0xFF: return bytes(out)
+            if b == 0xEE: a = (a & 0xFF0000) | kr[a+1] | kr[a+2] << 8; continue
+            if b in BANK_CH: out += kr[a:a+2]; a += 2; continue   # 인덱스가 EE 일 수 있다
+            out.append(b); a += 1
+        return None
+    pad, ff = [], []
+    for k, ((a, cap), (ja, ko)) in enumerate(zip(words.slots(orig), words.WORDS)):
+        if ko is None: continue
+        want = krcodec.encode(ko, codes, tbl)
+        if follow(a) != want: pad.append((k, ko, (follow(a) or b'').hex()))
+        if kr[a:a+cap+1].count(0xFF) != 1 or kr[a+cap] != 0xFF: ff.append((k, ko))
+    check("되읽은 단어 = 한국어 (남는 공백 없음)", not pad, f"{len(pad)}개 예: {pad[:3]}")
+    check("0xFF 는 엔트리마다 하나, 원래 자리", not ff, f"{ff[:4]}")
 
 def test_readable_roundtrip(rom_path):
     """모든 세그먼트에서 '판독문 -> 인코딩'이 원본 바이트와 일치하는지.

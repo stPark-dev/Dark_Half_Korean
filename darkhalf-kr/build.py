@@ -33,6 +33,7 @@ import patch_hwfont
 import cutscene
 import crytbl
 import montbl
+import eejump
 from dump import load_tbl
 from patch_desc import find_runs, KO as DESC, PREFIX
 
@@ -326,16 +327,20 @@ def main(src, tsv, dst, engine=True):
     # --- 3) 각 구간 삽입. 전부 제자리(원본 길이)라 포인터를 건드리지 않는다 ---
     over = []
 
-    def put(addr, cap, txt, tag):
+    def put(addr, cap, txt, tag, dialogue=False):
         b = krcodec.encode(txt, codes, t)
         if len(b) > cap:
             over.append((tag, addr, len(b), cap, txt)); return
-        rom[addr:addr+cap] = b + bytes([0x20]) * (cap - len(b))
+        if dialogue:
+            # 남는 칸이 그려지지 않게 둔다 (eejump.pad — 전투 명령 창 테두리)
+            rom[addr:addr+cap] = eejump.pad(addr, cap, txt, codes, t)[0]
+        else:
+            rom[addr:addr+cap] = b + bytes([0x20]) * (cap - len(b))
 
     for c, sg in zip(rows, segs):
         tr = c[8] if len(c) > 8 else ""
         if tr.strip():
-            put(sg["addr"], sg["len"], tr, f"대사 #{c[0]}")
+            put(sg["addr"], sg["len"], tr, f"대사 #{c[0]}", dialogue=True)
         else:
             b = bytes.fromhex(c[5])
             rom[sg["addr"]:sg["addr"]+len(b)] = b
@@ -346,6 +351,10 @@ def main(src, tsv, dst, engine=True):
         for tag, a, n, cap, x in over[:12]:
             print(f"   {tag} {a:#08x}: {n}/{cap}바이트 (초과 {n-cap})  {x[:40]}")
         sys.exit(1)
+
+    # 세그먼트 중간으로 뛰는 <EE> 꼬리 점프를 번역된 자리로 옮긴다. 시작만
+    # 지키는 제자리 삽입으로는 꼬리가 당겨진다 (루큐 전투 명령 창, eejump.py).
+    eejump.apply(rom, rows, codes, t, verbose=True)
 
     # --- 4) 단어표·이름표는 대사 뒤에 쓴다 ---
     # 이름표 문자열이 대사 뱅크(0x040C00~0x050000) 안에 있어서, 추출기가
