@@ -34,3 +34,6 @@ darkhalf-kr/ptrmap.json
 # Claude Code 로컬 설정 (기계마다 다르다)
 settings.local.json
 .claude/settings.local.json
+
+# 배포 패치 산출물 (mkpatch.py 로 재생성)
+dist/

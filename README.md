@@ -1385,8 +1385,13 @@ python3 darkhalf-kr/build.py "Dark Half (Japan).sfc" \
 python3 darkhalf-kr/verify_insert.py "Dark Half (Japan).sfc" \
     "Dark Half (Japan) [KR].sfc" darkhalf-kr/script_main.tsv
 
-# 전체 테스트 (10개 그룹)
+# 전체 테스트 (13개 그룹)
 python3 darkhalf-kr/test_kr.py "Dark Half (Japan).sfc"
+
+# 배포 패치(BPS) — 원본 MD5 확인 · 검사 · 빌드 · 역검증 · 왕복까지 한 번에.
+# 커밋되지 않은 변경이 있으면 거부합니다 (개발 중 확인은 --dev).
+python3 darkhalf-kr/mkpatch.py "Dark Half (Japan).sfc" "dist/Dark Half (Japan) [KR].bps"
+python3 darkhalf-kr/test_bps.py "Dark Half (Japan).sfc"
 
 # 파이프라인 정확성 검증 (번역 없이 왕복 → 0바이트 차이여야 함)
 python3 darkhalf-kr/pipeline.py roundtrip "Dark Half (Japan).sfc"
@@ -1416,3 +1421,11 @@ python3 darkhalf-kr/endbatch.py center   # 원문 광학 중심으로 정렬 재
 
 번역 패치 제작을 위한 개인 분석 작업입니다. 롬 이미지는 저장소에 포함되지 않으며
 포함할 계획도 없습니다. 배포 대상은 패치 파일과 도구뿐입니다.
+
+패치는 BPS 형식입니다. Flips · beat · RomPatcher.js 로 적용할 수 있고, 원본이
+다르면 도구가 CRC32 불일치로 거부합니다.
+
+| | MD5 | 크기 |
+|---|---|---|
+| 원본 `Dark Half (Japan).sfc` | `55108013f875db3b39da04b8f58489ab` | 3,145,728 (헤더 없음) |
+| 적용 결과 | `mkpatch.py` 출력 참조 | 4,194,304 |
